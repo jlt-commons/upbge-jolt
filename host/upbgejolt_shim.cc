@@ -73,12 +73,14 @@ static ujs_pointer as_ujs(const PointerRNA &ptr)
   return up;
 }
 
-/* find a property; nullptr + set_err on miss. An RNA pointer with both data
- * and type null is treated as invalid (matches the mock's obj_of). */
+/* find a property; nullptr + set_err on miss. An RNA pointer without a struct
+ * type is invalid — RNA_struct_find_property would deref the null type — so
+ * reject it regardless of whether data is set (a typeless pointer with data is
+ * the malformed case the old both-null check let through). */
 static PropertyRNA *find_prop(ujs_pointer owner, const char *name)
 {
   PointerRNA ptr = as_rna(owner);
-  if (ptr.data == nullptr && ptr.type == nullptr) {
+  if (ptr.type == nullptr) {
     set_err("invalid pointer");
     return nullptr;
   }
@@ -141,13 +143,9 @@ static void desc_of(PointerRNA &ptr, PropertyRNA *prop, ujs_prop_desc *out)
 
 extern "C" bool ujs_prop_find(ujs_pointer owner, const char *name, ujs_prop_desc *out)
 {
-  PointerRNA ptr = as_rna(owner);
-  PropertyRNA *prop = RNA_struct_find_property(&ptr, name);
-  if (prop == nullptr) {
-    set_err("no such property: %s", name);
-    return false;
-  }
-  desc_of(ptr, prop, out);
+  PropertyRNA *prop = find_prop(owner, name);
+  if (prop == nullptr) return false;
+  desc_of(as_rna(owner), prop, out);
   return true;
 }
 
@@ -164,7 +162,7 @@ struct props_iter {
 extern "C" ujs_iter_t ujs_props_iter(ujs_pointer owner)
 {
   PointerRNA ptr = as_rna(owner);
-  if (ptr.data == nullptr && ptr.type == nullptr) return 0;
+  if (ptr.type == nullptr) return 0;
   props_iter *it = (props_iter *)calloc(1, sizeof *it);
   it->ptr = ptr;
   int cap = 16;
@@ -460,8 +458,10 @@ extern "C" void ujs_coll_iter_free(ujs_iter_t h)
 /* ---- root -------------------------------------------------------------------------- */
 
 /* The editor-side root: set by the host integration (the WM timer hook) to
- * the context's scene data. Static because the bridge calls it from any
- * jolt thread but only reads it; the integration writes it once at boot. */
+ * the context's scene data. The bridge reads it only on the host's tick
+ * thread (core/marshal marshals there), the same thread the integration runs
+ * uj_set_root on before the frame loop starts, so there is no cross-thread
+ * access to g_root: set it once, before the first uj_tick / uj_start_repl. */
 static ujs_pointer g_root = {0, 0, nullptr};
 
 extern "C" void uj_set_root(ujs_pointer root)
@@ -480,3 +480,7 @@ extern "C" bool ujs_root(ujs_pointer *out)
 }
 
 extern "C" void ujs_test_reset(void) {}
+
+/* free memory this shim handed out (ujs_get_float_array_n); the caller must
+ * release through here, not its own allocator */
+extern "C" void ujs_free(void *ptr) { free(ptr); }

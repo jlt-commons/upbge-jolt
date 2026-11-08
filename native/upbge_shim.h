@@ -95,7 +95,8 @@ bool ujs_get_enum(ujs_pointer owner, const char *name, int64_t *out, const char 
 bool ujs_get_pointer(ujs_pointer owner, const char *name, ujs_pointer *out);
 /* fixed-length float array: out holds array_len doubles */
 bool ujs_get_float_array(ujs_pointer owner, const char *name, double *out, int32_t len);
-/* dynamic float array: caller frees *out_data */
+/* dynamic float array: caller frees *out_data with ujs_free (not the caller's
+ * own allocator) */
 bool ujs_get_float_array_n(ujs_pointer owner, const char *name, double **out_data, int32_t *out_len);
 
 /* ---- typed set ---- */
@@ -118,6 +119,15 @@ void ujs_coll_iter_free(ujs_iter_t it);
 /* ---- test-only hooks (mock shim; never called against a real host) ---- */
 
 void ujs_test_reset(void);
+
+/* ---- memory ---------------------------------------------------------------- */
+
+/* Free a pointer this shim handed out (e.g. the *out_data of
+ * ujs_get_float_array_n). The caller must release host allocations through
+ * here, not through its own allocator: on platforms where the runtime and
+ * the host link different heaps (Windows CRT), a cross-heap free corrupts
+ * memory. */
+void ujs_free(void *ptr);
 
 #ifdef __cplusplus
 }

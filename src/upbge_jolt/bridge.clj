@@ -22,6 +22,7 @@
 (ffi/defcfn ujs-last-error "ujs_last_error" [] :string)
 (ffi/defcfn ujs-root "ujs_root" [:pointer] :bool)
 (ffi/defcfn ujs-test-reset "ujs_test_reset" [] :void)
+(ffi/defcfn ujs-free "ujs_free" [:pointer] :void)
 
 (ffi/defcfn ujs-prop-find "ujs_prop_find" [:pointer :string :pointer] :bool)
 (ffi/defcfn ujs-props-iter "ujs_props_iter" [:pointer] :int64)
@@ -240,9 +241,9 @@
            (if (ujs-get-float-array-n buf name d-out n-out)
              (let [data (ffi/read d-out :pointer)
                    n    (ffi/read n-out :int32)]
-               (try
-                 (vec (map #(ffi/read data :double (* 8 %)) (range n)))
-                 (finally (ffi/free data))))
+              (try
+                (vec (map #(ffi/read data :double (* 8 %)) (range n)))
+                (finally (ujs-free data))))
              (host-error name))
            (finally (ffi/free d-out) (ffi/free n-out))))))))
 

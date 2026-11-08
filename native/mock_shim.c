@@ -383,3 +383,6 @@ bool ujs_coll_next(ujs_iter_t h, ujs_pointer *out) {
 }
 
 void ujs_coll_iter_free(ujs_iter_t h) { free((void *)(intptr_t)h); }
+
+/* free memory this shim handed out (ujs_get_float_array_n) */
+void ujs_free(void *ptr) { free(ptr); }
