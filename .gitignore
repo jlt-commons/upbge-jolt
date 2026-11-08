@@ -12,3 +12,4 @@ native/build_*/
 .lsp/
 .jolt/cpcache/
 .jolt-metrics.edn-cache/
+__pycache__/
