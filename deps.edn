@@ -30,7 +30,13 @@
                 :optional true}]
 
  :aliases {:test {:extra-paths ["test"]
-                  :main-opts   ["-m" "upbge-jolt.test-runner"]}}
+                  :main-opts   ["-m" "upbge-jolt.test-runner"]}
+
+           ;; code metrics (jlt-commons/jolt-metrics): jolt -M:metrics src
+           :metrics {:extra-deps {jlt-commons/jolt-metrics
+                                  {:git/url "https://github.com/jlt-commons/jolt-metrics"
+                                   :git/sha "c23aec7f5071c60b6ba9be61dd93afa3583a375f"}}
+                     :main-opts ["-m" "metrics.cli"]}}
 
  :tasks {:requires ([babashka.fs :as fs])
          :init (do (def os-name (System/getProperty "os.name"))
@@ -69,6 +75,10 @@
                   (println "up to date:" shlib))}
 
          test {:doc "unit tests (headless, mock shim)" :depends [native] :task (shell "jolt -M:test")}
+
+         metrics
+         {:doc "code-metrics report (jolt-metrics) over src, markdown to stdout"
+          :task (shell "jolt" "-M:metrics" "src" "--config" ".jolt-metrics.edn")}
 
          upbge-deps
          {:doc "clone UPBGE into native/upbge and build its dependencies (skipped once harvested)"

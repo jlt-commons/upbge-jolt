@@ -1,0 +1,9 @@
+{;; upbge-jolt's public API is called from outside the analyzed files — the
+ ;; host's C code (via the library exports), nREPL clients, and the editor —
+ ;; so its namespaces are declared API and their public functions are never
+ ;; listed as unreferenced. Tests live under test/.
+ :api-namespaces ["upbge-jolt.bpy"
+                  "upbge-jolt.bridge"
+                  "upbge-jolt.core"
+                  "upbge-jolt.library"]
+ :test-paths ["test"]}

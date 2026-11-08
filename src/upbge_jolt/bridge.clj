@@ -149,6 +149,15 @@
         [nil false])
       (finally (ffi/free out)))))
 
+(defn- props-realize
+  "Drain a property iterator into a vector, freeing the handle."
+  [it]
+  (loop [acc []]
+    (let [[d more?] (props-step it)]
+      (if more?
+        (recur (conj acc d))
+        (do (ujs-props-iter-free it) acc)))))
+
 (defn props
   "All property descriptors of `p`."
   [p]
@@ -156,13 +165,7 @@
    (fn []
      (with-ptr buf p
        (let [it (ujs-props-iter buf)]
-         (if (zero? it)
-           []
-           (loop [acc []]
-             (let [[d more?] (props-step it)]
-               (if more?
-                 (recur (conj acc d))
-                 (do (ujs-props-iter-free it) acc))))))))))
+         (if (zero? it) [] (props-realize it)))))))
 
 ;; --- typed get: one helper per property type -------------------------------------
 
@@ -253,25 +256,34 @@
              (host-error name))
            (finally (ffi/free d-out) (ffi/free n-out))))))))
 
+(defn- get-float
+  "Read a float property: scalar, fixed array, or dynamic array per the
+  descriptor's array-len."
+  [p name d]
+  (if (not= 0 (:array-len d))
+    (if (pos? (:array-len d))
+      (get-float-fixed p name (:array-len d))
+      (get-float-array-n p name))
+    (get-float-scalar p name)))
+
+(defn- get*
+  "The tick-thread body of `get`."
+  [p name]
+  (let [d (or (prop-find p name) (host-error name))]
+    (case (:type d)
+      :bool       (get-bool p name)
+      :int        (get-int p name)
+      :float      (get-float p name d)
+      :string     (get-string p name)
+      :enum       (get-enum p name)
+      :pointer    (get-pointer p name)
+      :collection (host-error name))))
+
 (defn get
   "Read property `name` on `p`. Float arrays return vectors of doubles,
   enums as {:value n :idname \"...\"}, pointers as maps or nil."
   [p name]
-  (core/marshal
-   (fn []
-     (let [d (or (prop-find p name) (host-error name))]
-       (case (:type d)
-         :bool       (get-bool p name)
-         :int        (get-int p name)
-         :float      (if (not= 0 (:array-len d))
-                       (if (pos? (:array-len d))
-                         (get-float-fixed p name (:array-len d))
-                         (get-float-array-n p name))
-                       (get-float-scalar p name))
-         :string     (get-string p name)
-         :enum       (get-enum p name)
-         :pointer    (get-pointer p name)
-         :collection (host-error name))))))
+  (core/marshal (fn [] (get* p name))))
 
 ;; --- typed set: one helper per property type --------------------------------------
 
@@ -316,23 +328,32 @@
         (or (ujs-set-pointer buf name vbuf) (host-error name))
         (finally (ffi/free vbuf))))))
 
+(defn- set-float
+  "Write a float property: array when the descriptor has an array-len, scalar
+  otherwise."
+  [p name v d]
+  (if (not= 0 (:array-len d))
+    (set-float-array! p name v)
+    (set-float-scalar! p name v)))
+
+(defn- set*!
+  "The tick-thread body of `set!`."
+  [p name v]
+  (let [d (or (prop-find p name) (host-error name))]
+    (case (:type d)
+      :bool       (set-bool! p name v)
+      :int        (set-int! p name v)
+      :float      (set-float p name v d)
+      :string     (set-string! p name v)
+      :enum       (set-enum! p name v)
+      :pointer    (set-pointer! p name v)
+      :collection (host-error name))))
+
 (defn set!
   "Write property `name` on `p`. Floats accept a scalar or a seq; pointers
   accept a map or nil (nil clears)."
   [p name v]
-  (core/marshal
-   (fn []
-     (let [d (or (prop-find p name) (host-error name))]
-       (case (:type d)
-         :bool       (set-bool! p name v)
-         :int        (set-int! p name v)
-         :float      (if (not= 0 (:array-len d))
-                       (set-float-array! p name v)
-                       (set-float-scalar! p name v))
-         :string     (set-string! p name v)
-         :enum       (set-enum! p name v)
-         :pointer    (set-pointer! p name v)
-         :collection (host-error name))))))
+  (core/marshal (fn [] (set*! p name v))))
 
 (defn set-float-array-n!
   "Write a dynamic-length float array property from a seq of doubles."
@@ -365,6 +386,15 @@
         [nil false])
       (finally (ffi/free out)))))
 
+(defn- coll-realize
+  "Drain a collection iterator into a vector, freeing the handle."
+  [it]
+  (loop [acc []]
+    (let [[m more?] (coll-step it)]
+      (if more?
+        (recur (if m (conj acc m) acc))
+        (do (ujs-coll-iter-free it) acc)))))
+
 (defn coll
   "Vector of collection `name`'s members on `p`. Errors when `name` is not a
   collection property. Realized inside (the iterator handle is freed before
@@ -377,13 +407,7 @@
      (coll-count p name)
      (with-ptr buf p
        (let [it (ujs-coll-iter buf name)]
-         (if (zero? it)
-           []
-            (loop [acc []]
-              (let [[m more?] (coll-step it)]
-                (if more?
-                  (recur (if m (conj acc m) acc))
-                  (do (ujs-coll-iter-free it) acc))))))))))
+         (if (zero? it) [] (coll-realize it)))))))
 
 ;; --- creation / structural mutation -------------------------------------------
 
@@ -412,31 +436,42 @@
         indices (vec (apply concat faces))]
     [offsets indices]))
 
+(defn- write-doubles!
+  "Write `xs` into `buf` as a packed double array."
+  [buf xs]
+  (doseq [[i x] (map-indexed vector xs)]
+    (ffi/write buf :double (double x) (* 8 i))))
+
+(defn- write-ints!
+  "Write `xs` into `buf` as a packed int32 array."
+  [buf xs]
+  (doseq [[i x] (map-indexed vector xs)]
+    (ffi/write buf :int32 x (* 4 i))))
+
+(defn- mesh-from-pydata*!
+  "The tick-thread body of `mesh-from-pydata!`."
+  [mesh verts faces]
+  (let [verts            (mapv (fn [xyz] (mapv double xyz)) verts)
+        nverts           (count verts)
+        [offsets indices] (face-encoding faces)
+        vbuf             (ffi/alloc (* 8 nverts 3))
+        obuf             (ffi/alloc (* 4 (count offsets)))
+        ibuf             (ffi/alloc (* 4 (count indices)))]
+    (try
+      (write-doubles! vbuf (vec (apply concat verts)))
+      (write-ints! obuf offsets)
+      (write-ints! ibuf indices)
+      (with-ptr buf mesh
+        (or (ujs-mesh-from-pydata buf vbuf nverts obuf (count faces) ibuf (count indices))
+            (host-error "vertices")))
+      mesh
+      (finally (ffi/free vbuf) (ffi/free obuf) (ffi/free ibuf)))))
+
 (defn mesh-from-pydata!
   "Build `mesh` geometry from `verts` (a seq of [x y z] triples) and `faces`
   (a seq of vertex-index seqs), like bpy's Mesh.from_pydata. Returns the mesh."
   [mesh verts faces]
-  (core/marshal
-   (fn []
-     (let [verts        (mapv (fn [xyz] (mapv double xyz)) verts)
-           nverts       (count verts)
-           [offsets indices] (face-encoding faces)
-           vbuf         (ffi/alloc (* 8 nverts 3))
-           obuf         (ffi/alloc (* 4 (count offsets)))
-           ibuf         (ffi/alloc (* 4 (count indices)))]
-       (try
-         (doseq [[i xyz] (map-indexed vector verts)
-                 [j c]  (map-indexed vector xyz)]
-           (ffi/write vbuf :double c (* 8 (+ (* i 3) j))))
-         (doseq [[i o] (map-indexed vector offsets)]
-           (ffi/write obuf :int32 o (* 4 i)))
-         (doseq [[i idx] (map-indexed vector indices)]
-           (ffi/write ibuf :int32 idx (* 4 i)))
-         (with-ptr buf mesh
-           (or (ujs-mesh-from-pydata buf vbuf nverts obuf (count faces) ibuf (count indices))
-               (host-error "vertices")))
-         mesh
-         (finally (ffi/free vbuf) (ffi/free obuf) (ffi/free ibuf)))))))
+  (core/marshal (fn [] (mesh-from-pydata*! mesh verts faces))))
 
 (defn coll-add!
   "Link `member` into collection `name` on `coll` (e.g. the scene's

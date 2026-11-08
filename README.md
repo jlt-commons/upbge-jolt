@@ -70,6 +70,7 @@ Two directions of calling:
 jolt native   # build the mock shim dylib
 jolt test     # unit tests (headless, mock shim)
 jolt lib      # build libjolt_upbge.dylib (--library)
+jolt metrics  # code-metrics report (jolt-metrics) over src
 jolt upbge-deps  # clone UPBGE into native/upbge + build its dependencies
 jolt upbge       # build the full UPBGE/Blender binary (deps first)
 ```
