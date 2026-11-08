@@ -13,6 +13,7 @@
 
 (def ^:private queue (atom clojure.lang.PersistentQueue/EMPTY))
 (def ^:private ticks (atom 0))
+(def ^:private frame-emitters (atom #{}))
 
 (defn enqueue!
   "Queue `f` to run on the host thread at the next tick. Safe from any
@@ -41,7 +42,8 @@
 (defn tick
   "Drain the op queue. Runs on the host's calling thread — the only consumer,
   so peek-then-pop needs no lock (enqueue! is many-producer, tick is
-  one-consumer). Ops enqueued during a tick wait for the next one."
+  one-consumer). Ops enqueued during a tick wait for the next one. After the
+  drain, notifies every frame emitter with the new tick count."
   []
   (swap! ticks inc)
   (binding [*in-tick* true]
@@ -50,6 +52,8 @@
         (swap! queue pop)
         (run-op! f)
         (recur))))
+  (doseq [emit @frame-emitters]
+    (emit @ticks))
   nil)
 
 (defn on-host-thread?
@@ -81,6 +85,18 @@
   "Number of ticks run. Exposed for tests and for repl sessions to poll."
   []
   @ticks)
+
+(defn frame-flow
+  "An ebb discrete flow emitting the tick count each time `tick` runs (every
+  host frame). Each subscription registers an emitter that tick notifies; the
+  returned cleanup (run by ebb on cancellation) deregisters it. This is the
+  engine-layer seam: drive per-frame logic from the REPL with
+  `(m/reduce f nil (frame-flow))`."
+  []
+  (m/observe
+   (fn [emit]
+     (swap! frame-emitters conj emit)
+     (fn [] (swap! frame-emitters disj emit)))))
 
 (defn pending-ops
   "Ops currently queued. For tests."

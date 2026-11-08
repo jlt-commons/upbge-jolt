@@ -1,6 +1,7 @@
 (ns upbge-jolt.core-test
   "Op queue, tick, eval, and nREPL lifecycle."
   (:require [clojure.test :refer [deftest is testing]]
+            [ebb.core :as m]
             [upbge-jolt.core :as c]
             [upbge-jolt.tick-pump :as pump]))
 
@@ -50,6 +51,17 @@
     (testing "errors propagate to the caller"
       (is (thrown-with-msg? Exception #"boom"
             (c/marshal (fn [] (throw (ex-info "boom" {})))))))))
+
+(deftest frame-flow
+  (let [acc (atom [])
+        cancel ((m/reduce (fn [_ n] (swap! acc conj n) nil) nil (c/frame-flow))
+                (fn [_] nil) (fn [_] nil))]
+    (c/tick)
+    (c/tick)
+    (c/tick)
+    (is (= 3 (count @acc)) "each tick emits one frame event")
+    (is (= [1 2 3] (map #(- % (dec (first @acc))) @acc)) "values are consecutive tick counts")
+    (cancel)))
 
 (deftest repl-lifecycle
   (let [stop (c/start-repl! 0)]
