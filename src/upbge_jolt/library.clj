@@ -11,6 +11,8 @@
   work marshals onto the host's tick thread through core/marshal (an op-queue
   round-trip blocked on an ebb dataflow variable), drained by uj_tick."
   (:require [upbge-jolt.core :as core]
+            [upbge-jolt.bridge]     ; bake the bridge into the runtime
+            [upbge-jolt.bpy]        ; and the ergonomic REPL layer
             [jolt.nrepl]            ; static so --library bakes it in
             [jolt.ffi :as ffi]))
 

@@ -182,7 +182,9 @@ extern "C" ujs_iter_t ujs_props_iter(ujs_pointer owner)
 {
   PointerRNA ptr = as_rna(owner);
   if (ptr.type == nullptr) return 0;
-  props_iter *it = (props_iter *)calloc(1, sizeof *it);
+  /* new, not calloc: PointerRNA holds a Vector, so its members must be
+   * constructed before the assignment below. */
+  props_iter *it = new props_iter();
   it->ptr = ptr;
   int cap = 16;
   it->names = (char **)malloc(cap * sizeof(char *));
@@ -202,7 +204,7 @@ extern "C" ujs_iter_t ujs_props_iter(ujs_pointer owner)
   RNA_property_collection_end(&rna);
   if (it->count == 0) {
     free(it->names);
-    free(it);
+    delete it;
     return 0;
   }
   return (ujs_iter_t)(intptr_t)it;
@@ -224,7 +226,7 @@ extern "C" void ujs_props_iter_free(ujs_iter_t h)
   if (it == nullptr) return;
   for (int i = 0; i < it->count; i++) free(it->names[i]);
   free(it->names);
-  free(it);
+  delete it;
 }
 
 /* ---- typed get --------------------------------------------------------------- */
@@ -458,7 +460,10 @@ extern "C" ujs_iter_t ujs_coll_iter(ujs_pointer owner, const char *name)
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_COLLECTION);
   if (prop == nullptr) return 0;
   PointerRNA ptr = as_rna(owner);
-  coll_iter *it = (coll_iter *)calloc(1, sizeof *it);
+  /* new, not calloc: CollectionPropertyIterator holds PointerRNA members with
+   * Vectors that must be constructed before RNA_property_collection_begin's
+   * `*iter = {}` assignment destroys and reassigns them. */
+  coll_iter *it = new coll_iter();
   RNA_property_collection_begin(&ptr, prop, &it->rna);
   return (ujs_iter_t)(intptr_t)it;
 }
@@ -477,7 +482,7 @@ extern "C" void ujs_coll_iter_free(ujs_iter_t h)
   coll_iter *it = (coll_iter *)(intptr_t)h;
   if (it == nullptr) return;
   RNA_property_collection_end(&it->rna);
-  free(it);
+  delete it;
 }
 
 /* ---- creation / structural mutation ------------------------------------------ */
