@@ -274,7 +274,7 @@
         n (count xs)
         dbuf (ffi/alloc (* 8 n))]
     (try
-      (dotimes [i n] (ffi/write dbuf :double (nth xs i) (* 8 i)))
+      (dotimes [i n] (ffi/write dbuf :double (double (nth xs i)) (* 8 i)))
       (with-ptr buf p
         (or (ujs-set-float-array buf name dbuf n) (host-error name)))
       (finally (ffi/free dbuf)))))
