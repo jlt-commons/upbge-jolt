@@ -94,8 +94,35 @@
   (link! (add-object! name (add-mesh! (str name "-mesh") verts faces))))
 
 (defn ops
-  "Run the named operator (the `bpy.ops` equivalent, e.g.
-  \"mesh.primitive_cube_add\") with default arguments. Returns true when it
-  finished."
-  [opname]
-  (b/operator! opname))
+  "Run the named operator (the `bpy.ops` equivalent), optionally with
+  properties and an editor area to run in:
+  (ops \"mesh.primitive_cube_add\" {:size 2 :location [0 0 1]})
+  (ops \"view3d.view_all\" {} {:area \"VIEW_3D\"}). Returns true."
+  ([opname] (b/op! opname))
+  ([opname props] (b/op! opname props))
+  ([opname props opts] (b/op! opname props opts)))
+
+(defn data
+  "bpy.data."
+  []
+  (b/data))
+
+(defn context
+  "bpy.context."
+  []
+  (b/context))
+
+(defn save!
+  "Save the open file to `path` (wm.save_as_mainfile)."
+  [path]
+  (ops "wm.save_as_mainfile" {:filepath path}))
+
+(defn open!
+  "Open the .blend file at `path` (wm.open_mainfile)."
+  [path]
+  (ops "wm.open_mainfile" {:filepath path}))
+
+(defn delete!
+  "Remove `obj` from the file entirely (bpy.data.objects.remove)."
+  [obj]
+  (b/call (b/get (data) "objects") "remove" {:object obj :do_unlink true}))

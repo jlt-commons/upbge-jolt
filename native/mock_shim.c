@@ -112,6 +112,7 @@ void ujs_test_reset(void) {
   g_last_error[0] = 0;
 
   mock_obj *scene = add_obj("Scene");
+  add_prop(scene, "objects", UJS_PROP_COLLECTION, 0, "SceneObjects");
   scene->coll_members[0] = 1; /* Cube */
   scene->coll_members[1] = 2; /* Lamp */
   scene->ncoll = 2;
@@ -130,6 +131,7 @@ void ujs_test_reset(void) {
   snprintf(mode->enum_id, sizeof mode->enum_id, "EDIT");
   mock_prop *data = add_prop(cube, "data", UJS_PROP_POINTER, 0, "Mesh");
   data->v.obj_index = 3;
+  add_prop(cube, "lock_location", UJS_PROP_BOOL, 3, NULL); /* fa[] zeroed */
 
   mock_obj *lamp = add_obj("Lamp");
   mock_prop *lname = add_prop(lamp, "name", UJS_PROP_STRING, 0, NULL);
@@ -145,6 +147,12 @@ void ujs_test_reset(void) {
   verts->v.dyn[0] = 0; verts->v.dyn[1] = 0; verts->v.dyn[2] = 0;
   verts->v.dyn[3] = 1; verts->v.dyn[4] = 0; verts->v.dyn[5] = 0;
   verts->v.dyn[6] = 0; verts->v.dyn[7] = 1; verts->v.dyn[8] = 0;
+
+  /* bpy.data (index 4) and bpy.context (index 5) */
+  mock_obj *main_db = add_obj("Data");
+  add_prop(main_db, "filepath", UJS_PROP_STRING, 0, NULL);
+  mock_obj *context = add_obj("Context");
+  add_prop(context, "scene", UJS_PROP_POINTER, 0, "Scene")->v.obj_index = 0;
 
   /* two toy KX objects in the "running game" */
   g_nkx = 0;
@@ -597,3 +605,175 @@ bool ujs_kx_set_world_position(ujs_pointer obj, const double *xyz) {
 
 /* free memory this shim handed out (ujs_get_float_array_n) */
 void ujs_free(void *ptr) { free(ptr); }
+
+/* --- round 1: roots, operators with arguments, function calls, lookup,
+ * bulk access, int arrays, enums by identifier ------------------------------ */
+
+static bool find_named(const char *name, ujs_pointer *out) {
+  for (int i = 0; i < g_nobjects; i++)
+    if (strcmp(g_objects[i].name, name) == 0) {
+      out->owner = i; out->type = 0; out->data = &g_objects[i];
+      return true;
+    }
+  set_err("no state; call ujs_test_reset");
+  return false;
+}
+
+bool ujs_data_root(ujs_pointer *out) { return find_named("Data", out); }
+bool ujs_context_root(ujs_pointer *out) { return find_named("Context", out); }
+
+bool ujs_operator_call_ex(const char *opname, int32_t n, const char **keys,
+                          const char **vals, const char *area) {
+  if (area && strcmp(area, "VIEW_3D") != 0) {
+    char msg[128];
+    snprintf(msg, sizeof msg, "no %s area open", area);
+    set_err(msg);
+    return false;
+  }
+  if (strcmp(opname, "mesh.primitive_cube_add") != 0) return ujs_operator_call(opname);
+  double loc[3] = {0, 0, 0};
+  for (int i = 0; i < n; i++) {
+    if (strcmp(keys[i], "location") == 0) {
+      sscanf(vals[i], "%lf,%lf,%lf", &loc[0], &loc[1], &loc[2]);
+    } else if (strcmp(keys[i], "size") != 0) {
+      char msg[128];
+      snprintf(msg, sizeof msg, "no such property: %s", keys[i]);
+      set_err(msg);
+      return false;
+    }
+  }
+  if (!ujs_operator_call(opname)) return false;
+  mock_obj *scene = &g_objects[0];
+  mock_obj *added = &g_objects[scene->coll_members[scene->ncoll - 1]];
+  mock_prop *lp = prop_find(added, "location");
+  if (lp) { lp->v.fa[0] = loc[0]; lp->v.fa[1] = loc[1]; lp->v.fa[2] = loc[2]; }
+  return true;
+}
+
+/* A collection's function struct: same object, type 1 marks "Scene.objects". */
+bool ujs_coll_ptr(ujs_pointer owner, const char *name, ujs_pointer *out) {
+  mock_obj *o = obj_of(owner);
+  if (!o) { set_err("invalid pointer"); return false; }
+  if (strcmp(o->name, "Scene") != 0 || strcmp(name, "objects") != 0) {
+    set_err("collection has no functions"); return false;
+  }
+  *out = owner;
+  out->type = 1;
+  return true;
+}
+
+bool ujs_func_call(ujs_pointer self, const char *fname, int32_t n,
+                   const char **names, const ujs_value *args, ujs_value *ret) {
+  mock_obj *o = obj_of(self);
+  if (!o) { set_err("invalid pointer"); return false; }
+  memset(ret, 0, sizeof *ret);
+  ret->type = UJS_VAL_NONE;
+  if (self.type == 1 && (strcmp(fname, "link") == 0 || strcmp(fname, "unlink") == 0)) {
+    for (int i = 0; i < n; i++)
+      if (strcmp(names[i], "object") == 0) {
+        ujs_pointer scene = self; scene.type = 0;
+        return strcmp(fname, "link") == 0 ? ujs_coll_add(scene, "objects", args[i].p)
+                                          : ujs_coll_remove(scene, "objects", args[i].p);
+      }
+    set_err("missing required argument object");
+    return false;
+  }
+  char msg[160];
+  snprintf(msg, sizeof msg, "%s has no function %s", self.type == 1 ? "SceneObjects" : o->name, fname);
+  set_err(msg);
+  return false;
+}
+
+bool ujs_coll_lookup(ujs_pointer owner, const char *name, const char *key,
+                     int64_t index, ujs_pointer *out) {
+  mock_obj *o = obj_of(owner);
+  if (!o) { set_err("invalid pointer"); return false; }
+  if (strcmp(o->name, "Scene") != 0 || strcmp(name, "objects") != 0) {
+    set_err("not a collection property"); return false;
+  }
+  for (int i = 0; i < o->ncoll; i++) {
+    int m = o->coll_members[i];
+    mock_prop *np = prop_find(&g_objects[m], "name");
+    if ((key && np && strcmp(np->v.s, key) == 0) || (!key && i == index)) {
+      out->owner = m; out->type = 0; out->data = &g_objects[m];
+      return true;
+    }
+  }
+  set_err("no such item");
+  return false;
+}
+
+/* the mock mesh keeps vertex coordinates as a dynamic float property, so
+ * foreach over (mesh, "vertices", "co") maps onto it */
+static mock_prop *foreach_prop(ujs_pointer owner, const char *name, const char *attr, int64_t len) {
+  mock_obj *o = obj_of(owner);
+  if (!o) { set_err("invalid pointer"); return NULL; }
+  mock_prop *p = prop_find(o, name);
+  if (!p || p->array_len != -1 || strcmp(attr, "co") != 0) {
+    set_err("foreach: unsupported collection/attribute"); return NULL;
+  }
+  if (len != p->dyn_len) { set_err("foreach: length mismatch"); return NULL; }
+  return p;
+}
+
+bool ujs_coll_foreach_get(ujs_pointer owner, const char *name, const char *attr,
+                          double *buf, int64_t len) {
+  mock_prop *p = foreach_prop(owner, name, attr, len);
+  if (!p) return false;
+  memcpy(buf, p->v.dyn, len * sizeof(double));
+  return true;
+}
+
+bool ujs_coll_foreach_set(ujs_pointer owner, const char *name, const char *attr,
+                          const double *buf, int64_t len) {
+  mock_prop *p = foreach_prop(owner, name, attr, len);
+  if (!p) return false;
+  memcpy(p->v.dyn, buf, len * sizeof(double));
+  return true;
+}
+
+static mock_prop *int_array_prop(ujs_pointer owner, const char *name) {
+  mock_obj *o = obj_of(owner);
+  if (!o) { set_err("invalid pointer"); return NULL; }
+  mock_prop *p = prop_find(o, name);
+  if (!p || (p->type != UJS_PROP_BOOL && p->type != UJS_PROP_INT) || p->array_len <= 0) {
+    set_err("not an int/bool array property"); return NULL;
+  }
+  return p;
+}
+
+bool ujs_get_int_array(ujs_pointer owner, const char *name, int64_t **out, int32_t *len) {
+  mock_prop *p = int_array_prop(owner, name);
+  if (!p) return false;
+  int64_t *d = malloc(p->array_len * sizeof(int64_t));
+  for (int i = 0; i < p->array_len; i++) d[i] = (int64_t)p->v.fa[i];
+  *out = d;
+  *len = p->array_len;
+  return true;
+}
+
+bool ujs_set_int_array(ujs_pointer owner, const char *name, const int64_t *v, int32_t len) {
+  mock_prop *p = int_array_prop(owner, name);
+  if (!p) return false;
+  if (len != p->array_len) { set_err("array length mismatch"); return false; }
+  for (int i = 0; i < len; i++) p->v.fa[i] = (double)v[i];
+  return true;
+}
+
+bool ujs_set_enum_id(ujs_pointer owner, const char *name, const char *ids) {
+  static const char *items[] = {"OBJECT", "EDIT", "SCULPT"};
+  mock_obj *o = obj_of(owner);
+  if (!o) { set_err("invalid pointer"); return false; }
+  mock_prop *p = prop_find(o, name);
+  if (!p || p->type != UJS_PROP_ENUM) { set_err("not an enum property"); return false; }
+  for (int i = 0; i < 3; i++)
+    if (strcmp(items[i], ids) == 0) {
+      p->v.e = i;
+      snprintf(p->enum_id, sizeof p->enum_id, "%s", ids);
+      return true;
+    }
+  char msg[128];
+  snprintf(msg, sizeof msg, "%s: no enum item %s", name, ids);
+  set_err(msg);
+  return false;
+}

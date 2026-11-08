@@ -66,6 +66,22 @@ typedef struct {
 /* opaque iterator handles; 0 means exhausted/absent/failed */
 typedef int64_t ujs_iter_t;
 
+/* A tagged value for RNA function arguments and results. `type` is a
+ * UJS_PROP_* tag, or UJS_VAL_NONE. Bool/int/enum-value use `i`; float uses
+ * `f`; string and enum identifiers use `s`; float arrays use `fa` + `len`;
+ * pointers use `p`. Results that carry `s` or `fa` point into shim-owned
+ * memory valid until the next ujs_* call. 64 bytes, 8-aligned. */
+enum { UJS_VAL_NONE = -1 };
+typedef struct {
+  int32_t type;
+  int32_t len;
+  int64_t i;
+  double f;
+  const char *s;
+  const double *fa;
+  ujs_pointer p;
+} ujs_value;
+
 /* ---- lifecycle / introspection ---- */
 
 /* last error message from a failed call, or NULL */
@@ -74,6 +90,11 @@ const char *ujs_last_error(void);
 /* the root pointer for editor-style access. Real shim: the RNA pointer for
  * bpy.context's scene data (or Main). Mock: the mock Scene. */
 bool ujs_root(ujs_pointer *out);
+
+/* bpy.data (the Main database) and bpy.context. ujs_root is the context's
+ * scene, resolved on every call so it stays valid across file loads. */
+bool ujs_data_root(ujs_pointer *out);
+bool ujs_context_root(ujs_pointer *out);
 
 /* find property `name` on the pointer's type; fills *out */
 bool ujs_prop_find(ujs_pointer owner, const char *name, ujs_prop_desc *out);
@@ -154,6 +175,46 @@ bool ujs_coll_remove(ujs_pointer coll, const char *name, ujs_pointer member);
  * thread. Returns true when the operator ran (finished). */
 
 bool ujs_operator_call(const char *opname);
+
+/* Run operator `opname` with `n` properties given as identifier/value
+ * strings, each parsed by the property's RNA type ("true"/"false", numbers,
+ * comma-separated arrays, enum identifiers). `area` names an editor
+ * ("VIEW_3D", "NODE_EDITOR", ...) whose area/region the operator runs in, or
+ * NULL for the current context. On failure, ujs_last_error carries the
+ * operator's reports or poll message. */
+bool ujs_operator_call_ex(const char *opname, int32_t n, const char **keys,
+                          const char **vals, const char *area);
+
+/* Call RNA function `fname` on `self` (e.g. BlendDataMaterials.new,
+ * NodeLinks.new, ObjectModifiers.new) with `n` named arguments. The first
+ * output (the return value) goes to *ret (type UJS_VAL_NONE when the
+ * function returns nothing). */
+bool ujs_func_call(ujs_pointer self, const char *fname, int32_t n,
+                   const char **names, const ujs_value *args, ujs_value *ret);
+
+/* The collection property's function struct (BlendDataMaterials,
+ * NodeLinks, ObjectModifiers, ...), the `self` for ujs_func_call on things
+ * like bpy.data.materials.new. Fails when the collection has none. */
+bool ujs_coll_ptr(ujs_pointer owner, const char *name, ujs_pointer *out);
+
+/* Set an enum property by identifier ("SUN", "BLENDER_EEVEE"); flag enums
+ * take comma-separated identifiers. */
+bool ujs_set_enum_id(ujs_pointer owner, const char *name, const char *ids);
+
+/* Collection item by string key (`key` non-NULL) or index. */
+bool ujs_coll_lookup(ujs_pointer owner, const char *name, const char *key,
+                     int64_t index, ujs_pointer *out);
+
+/* Bulk read/write of attribute `attr` across every item of collection
+ * `name` (foreach_get / foreach_set), `len` doubles, item-major. */
+bool ujs_coll_foreach_get(ujs_pointer owner, const char *name, const char *attr,
+                          double *buf, int64_t len);
+bool ujs_coll_foreach_set(ujs_pointer owner, const char *name, const char *attr,
+                          const double *buf, int64_t len);
+
+/* Int/bool arrays (fixed or dynamic length) as int64. */
+bool ujs_get_int_array(ujs_pointer owner, const char *name, int64_t **out, int32_t *len);
+bool ujs_set_int_array(ujs_pointer owner, const char *name, const int64_t *v, int32_t len);
 
 /* ---- KX engine (the running game) -------------------------------------------
  *

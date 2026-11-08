@@ -55,9 +55,9 @@
 
 (deftest type-errors
   (let [cube (first (b/coll (b/root) "objects"))]
-    (testing "enum set with a non-number throws a jolt-side error"
+    (testing "enum set with an unknown identifier names it"
       (is (thrown-with-msg?
-            Exception #"numeric value"
+            Exception #"no enum item not-a-number"
             (b/set! cube "mode" :not-a-number))))
     (testing "set on unknown property throws with the host message"
       (is (thrown-with-msg?
@@ -106,7 +106,7 @@
     (testing "props lists every property with its type"
       (let [props (b/props cube)
             by-name (into {} (map (juxt :name identity) props))]
-        (is (= 6 (count props)))
+        (is (= 7 (count props)))
         (is (= :string (:type (by-name "name"))))
         (is (= :pointer (:type (by-name "data"))))
         (is (= "Mesh" (:item-type (by-name "data"))))))))
@@ -181,3 +181,70 @@
             (b/operator! "nonsense.op"))))
     (testing "a no-op operator returns true"
       (is (true? (b/operator! "object.select_all"))))))
+
+;; --- round 1: bpy.data/context, operators with args, function calls,
+;; lookup, bulk access, int arrays, enums by identifier
+
+(defn- cube [] (first (b/coll (b/root) "objects")))
+
+(deftest data-and-context-roots
+  (testing "bpy.data and bpy.context resolve"
+    (is (= "" (b/get (b/data) "filepath")))
+    (is (= (:data (b/root)) (:data (b/get (b/context) "scene"))))))
+
+(deftest operators-with-arguments
+  (testing "op! passes typed properties"
+    (is (true? (b/op! "mesh.primitive_cube_add" {:size 2.0 :location [4 5 6]})))
+    (is (= [4.0 5.0 6.0] (b/get (last (b/coll (b/root) "objects")) "location"))))
+  (testing "op! runs in an editor area"
+    (is (true? (b/op! "mesh.primitive_cube_add" {} {:area "VIEW_3D"}))))
+  (testing "op! reports a missing area"
+    (is (thrown-with-msg? Exception #"no NODE_EDITOR area"
+          (b/op! "mesh.primitive_cube_add" {} {:area :NODE_EDITOR}))))
+  (testing "op! rejects an unknown property"
+    (is (thrown-with-msg? Exception #"no such property: bogus"
+          (b/op! "mesh.primitive_cube_add" {:bogus 1})))))
+
+(deftest function-calls
+  (let [objects (b/get (b/root) "objects")
+        obj (b/id-new "Object" "Linked")]
+    (testing "a collection's function struct takes calls"
+      (is (nil? (b/call objects "link" {:object obj})))
+      (is (= ["Cube" "Lamp" "Linked"] (mapv #(b/get % "name") (b/coll (b/root) "objects")))))
+    (testing "an unknown function is reported"
+      (is (thrown-with-msg? Exception #"has no function nope"
+            (b/call objects "nope" {}))))))
+
+(deftest collection-lookup
+  (testing "by name and by index"
+    (is (= "Lamp" (b/get (b/lookup (b/root) "objects" "Lamp") "name")))
+    (is (= "Cube" (b/get (b/lookup (b/root) "objects" 0) "name")))
+    (is (nil? (b/lookup (b/root) "objects" "Missing")))))
+
+(deftest bulk-foreach
+  (let [mesh (b/get (cube) "data")]
+    (testing "foreach-get reads every item's attribute"
+      (is (= [0.0 0.0 0.0 1.0 0.0 0.0 0.0 1.0 0.0]
+             (vec (b/foreach-get mesh "vertices" "co" 9)))))
+    (testing "foreach-set! writes them"
+      (b/foreach-set! mesh "vertices" "co" [1 1 1 2 2 2 3 3 3])
+      (is (= [1.0 1.0 1.0 2.0 2.0 2.0 3.0 3.0 3.0]
+             (vec (b/foreach-get mesh "vertices" "co" 9)))))
+    (testing "a length mismatch is an error"
+      (is (thrown? Exception (b/foreach-get mesh "vertices" "co" 4))))))
+
+(deftest int-and-bool-arrays
+  (testing "bool arrays read and write as vectors"
+    (is (= [false false false] (b/get (cube) "lock_location")))
+    (b/set! (cube) "lock_location" [true false true])
+    (is (= [true false true] (b/get (cube) "lock_location")))))
+
+(deftest enums-by-identifier
+  (testing "set! takes an enum identifier"
+    (b/set! (cube) "mode" "SCULPT")
+    (is (= {:value 2 :idname "SCULPT"} (b/get (cube) "mode")))
+    (b/set! (cube) "mode" :OBJECT)
+    (is (= "OBJECT" (:idname (b/get (cube) "mode")))))
+  (testing "an unknown identifier is reported"
+    (is (thrown-with-msg? Exception #"no enum item NOPE"
+          (b/set! (cube) "mode" "NOPE")))))

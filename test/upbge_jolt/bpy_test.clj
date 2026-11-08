@@ -62,3 +62,8 @@
       (is (= ["Cube" "Lamp" "Tmp"] (mapv bpy/name-of (bpy/objects))))
       (bpy/unlink! obj)
       (is (= ["Cube" "Lamp"] (mapv bpy/name-of (bpy/objects)))))))
+
+(deftest ops-with-properties
+  (testing "ops forwards properties to the operator"
+    (is (true? (bpy/ops "mesh.primitive_cube_add" {:location [1 2 3]})))
+    (is (= [1.0 2.0 3.0] (bpy/pos (last (bpy/objects)))))))

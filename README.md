@@ -8,11 +8,27 @@ Connect CIDER/Calva/Cursive to the port in `.nrepl-port`, and evaluate
 against the running editor or game:
 
 ```clojure
-(require '[upbge-jolt.bridge :as b])
-(def cube (first (b/coll (b/root) "objects")))
+(require '[upbge-jolt.bridge :as b] '[upbge-jolt.bpy :as bpy])
+(def cube (b/lookup (b/data) "objects" "Cube"))
 (b/get cube "location")            ; => [1.0 2.0 3.0]
 (b/set! cube "location" [10 20 30])
+
+;; bpy.data.materials.new / node trees / links, as RNA function calls
+(def mat (b/call (b/get (b/data) "materials") "new" {:name "Teak"}))
+(b/set! mat "use_nodes" true)
+(def nt (b/get mat "node_tree"))
+(b/call (b/get nt "nodes") "new" {:type "ShaderNodeTexNoise"})
+
+;; operators with properties, in an editor area when they need one
+(bpy/ops "mesh.primitive_uv_sphere_add" {:radius 0.5 :location [2 0 1]})
+(bpy/ops "view3d.view_all" {} {:area "VIEW_3D"})
+(bpy/save! "/tmp/scene.blend")
 ```
+
+`b/get` on a collection property returns its function struct (the `self` for
+`b/call`, like `bpy.data.materials`); `b/coll` iterates it, `b/lookup` finds
+items by name or index, `b/foreach-get`/`b/foreach-set!` move bulk data
+(vertex coordinates, UVs, pixels). Enums take identifiers (`"SUN"`).
 
 ## How it fits together
 
@@ -165,6 +181,10 @@ it on the frame. Reentrant calls (from inside a tick-drained op) run inline.
       live game engine (windowed; the game loop pumps `uj_tick`)
 - [x] Editor-side pump (`bpy.app.timers`) for live editing in the windowed
       editor; game-side tick from NextFrame
+- [x] bpy.data / bpy.context roots (resolved live, valid across file loads),
+      operators with properties and an editor-area context, generic RNA
+      function calls, collection lookup, bulk foreach get/set, int/bool
+      arrays, enums by identifier, save/open — verified against the live editor
 - unchecked box = in progress or planned
 
 ## License

@@ -49,6 +49,16 @@
 #include "DEG_depsgraph_build.hh"
 
 #include "WM_api.hh"
+#include "WM_types.hh"
+
+#include "BKE_context.hh"
+#include "MEM_guardedalloc.h"
+#include "BKE_report.hh"
+#include "BKE_screen.hh"
+#include "DNA_screen_types.h"
+#include "DNA_space_types.h"
+#include "DNA_windowmanager_types.h"
+#include "RNA_enum_types.hh"
 #include "bpy_capi_utils.hh"
 
 #include "EXP_ListValue.h"
@@ -777,27 +787,691 @@ extern "C" bool ujs_kx_set_world_position(ujs_pointer obj, const double *xyz)
   return true;
 }
 
-/* ---- root -------------------------------------------------------------------------- */
+/* ---- roots ------------------------------------------------------------------------- */
 
-/* The editor-side root: set by the host integration (the WM timer hook) to
- * the context's scene data. The bridge reads it only on the host's tick
- * thread (core/marshal marshals there), the same thread the integration runs
- * uj_set_root on before the frame loop starts, so there is no cross-thread
- * access to g_root: set it once, before the first uj_tick / uj_start_repl. */
-static ujs_pointer g_root = {0, 0, nullptr};
+/* Roots resolve on every call, never cached: loading a file frees the old
+ * Main and its scenes, and a cached pointer would dangle. The scene is the
+ * context's (falling back to the first scene with no window context);
+ * uj_set_root is kept for ABI compatibility and is now a no-op. */
 
-extern "C" void uj_set_root(ujs_pointer root)
+extern "C" void uj_set_root(ujs_pointer /*root*/) {}
+
+static bContext *ctx()
 {
-  g_root = root;
+  return BPY_context_get();
 }
 
 extern "C" bool ujs_root(ujs_pointer *out)
 {
-  if (g_root.data == nullptr) {
-    set_err("no root set; the host integration must call uj_set_root");
+  bContext *C = ctx();
+  Scene *scene = C ? CTX_data_scene(C) : nullptr;
+  if (scene == nullptr && G_MAIN != nullptr) {
+    scene = static_cast<Scene *>(G_MAIN->scenes.first());
+  }
+  if (scene == nullptr) {
+    set_err("no scene");
     return false;
   }
-  *out = g_root;
+  *out = as_ujs(RNA_id_pointer_create(&scene->id));
+  return true;
+}
+
+extern "C" bool ujs_data_root(ujs_pointer *out)
+{
+  if (G_MAIN == nullptr) {
+    set_err("no main database");
+    return false;
+  }
+  *out = as_ujs(RNA_main_pointer_create(G_MAIN));
+  return true;
+}
+
+extern "C" bool ujs_context_root(ujs_pointer *out)
+{
+  bContext *C = ctx();
+  if (C == nullptr) {
+    set_err("no context");
+    return false;
+  }
+  *out = as_ujs(RNA_pointer_create_discrete(nullptr, RNA_Context, C));
+  return true;
+}
+
+/* ---- reports ------------------------------------------------------------------------ */
+
+/* Move error reports into the last-error buffer; true when there were any. */
+static bool take_reports(ReportList *reports, const char *what)
+{
+  char *msg = BKE_reports_string(reports, RPT_ERROR);
+  bool had = msg != nullptr && msg[0] != '\0';
+  if (had) {
+    set_err("%s: %s", what, msg);
+  }
+  if (msg) MEM_delete(msg);
+  BKE_reports_free(reports);
+  return had;
+}
+
+/* ---- context override --------------------------------------------------------------- */
+
+/* Point the context at the first area of `area_type` (an rna space-type
+ * identifier like "VIEW_3D") and its main region, saving the old values. */
+struct CtxOverride {
+  bContext *C = nullptr;
+  wmWindow *win = nullptr;
+  bScreen *screen = nullptr;
+  ScrArea *area = nullptr;
+  ARegion *region = nullptr;
+  bool active = false;
+};
+
+static bool ctx_override_begin(bContext *C, const char *area_type, CtxOverride &o)
+{
+  o.C = C;
+  if (area_type == nullptr || area_type[0] == '\0') return true;
+  int spacetype;
+  if (!RNA_enum_value_from_identifier(rna_enum_space_type_items, area_type, &spacetype)) {
+    set_err("unknown area type: %s", area_type);
+    return false;
+  }
+  wmWindowManager *wm = CTX_wm_manager(C);
+  if (wm == nullptr) {
+    set_err("no window manager (running headless?)");
+    return false;
+  }
+  for (wmWindow *win = static_cast<wmWindow *>(wm->windows.first()); win; win = win->next) {
+    bScreen *screen = WM_window_get_active_screen(win);
+    if (screen == nullptr) continue;
+    for (ScrArea *area = static_cast<ScrArea *>(screen->areabase.first()); area; area = area->next) {
+      if (area->spacetype != spacetype) continue;
+      o.win = CTX_wm_window(C);
+      o.screen = CTX_wm_screen(C);
+      o.area = CTX_wm_area(C);
+      o.region = CTX_wm_region(C);
+      o.active = true;
+      CTX_wm_window_set(C, win);
+      CTX_wm_screen_set(C, screen);
+      CTX_wm_area_set(C, area);
+      CTX_wm_region_set(C, BKE_area_find_region_type(area, RGN_TYPE_WINDOW));
+      return true;
+    }
+  }
+  set_err("no %s area open", area_type);
+  return false;
+}
+
+static void ctx_override_end(CtxOverride &o)
+{
+  if (!o.active) return;
+  CTX_wm_window_set(o.C, o.win);
+  CTX_wm_screen_set(o.C, o.screen);
+  CTX_wm_area_set(o.C, o.area);
+  CTX_wm_region_set(o.C, o.region);
+}
+
+/* ---- operators with arguments -------------------------------------------------------- */
+
+/* Parse `val` into operator property `key` by its RNA type. */
+static bool set_prop_from_string(bContext *C, PointerRNA *ptr, const char *key, const char *val)
+{
+  PropertyRNA *prop = RNA_struct_find_property(ptr, key);
+  if (prop == nullptr) {
+    set_err("no such property: %s", key);
+    return false;
+  }
+  const bool is_array = RNA_property_array_check(prop);
+  switch (RNA_property_type(prop)) {
+    case PROP_BOOLEAN:
+      if (is_array) {
+        int n = RNA_property_array_length(ptr, prop);
+        bool *b = (bool *)calloc(n, sizeof(bool));
+        const char *c = val;
+        for (int i = 0; i < n && c && *c; i++) {
+          b[i] = strncmp(c, "true", 4) == 0 || *c == '1';
+          c = strchr(c, ',');
+          if (c) c++;
+        }
+        RNA_property_boolean_set_array(ptr, prop, b);
+        free(b);
+      }
+      else {
+        RNA_property_boolean_set(ptr, prop, strcmp(val, "true") == 0 || strcmp(val, "1") == 0);
+      }
+      return true;
+    case PROP_INT:
+    case PROP_FLOAT: {
+      const bool is_int = RNA_property_type(prop) == PROP_INT;
+      if (is_array) {
+        int n = RNA_property_array_length(ptr, prop);
+        double *d = (double *)calloc(n, sizeof(double));
+        const char *c = val;
+        int got = 0;
+        for (; got < n && c && *c; got++) {
+          d[got] = strtod(c, nullptr);
+          c = strchr(c, ',');
+          if (c) c++;
+        }
+        if (got != n) {
+          free(d);
+          set_err("%s wants %d values, got %d", key, n, got);
+          return false;
+        }
+        if (is_int) {
+          int *iv = (int *)malloc(n * sizeof(int));
+          for (int i = 0; i < n; i++) iv[i] = (int)d[i];
+          RNA_property_int_set_array(ptr, prop, iv);
+          free(iv);
+        }
+        else {
+          float *fv = (float *)malloc(n * sizeof(float));
+          for (int i = 0; i < n; i++) fv[i] = (float)d[i];
+          RNA_property_float_set_array(ptr, prop, fv);
+          free(fv);
+        }
+        free(d);
+      }
+      else if (is_int) {
+        RNA_property_int_set(ptr, prop, (int)strtoll(val, nullptr, 10));
+      }
+      else {
+        RNA_property_float_set(ptr, prop, (float)strtod(val, nullptr));
+      }
+      return true;
+    }
+    case PROP_STRING:
+      RNA_property_string_set(ptr, prop, val);
+      return true;
+    case PROP_ENUM: {
+      /* flag enums take comma-separated identifiers */
+      int acc = 0;
+      std::string all(val);
+      size_t start = 0;
+      while (start <= all.size()) {
+        size_t end = all.find(',', start);
+        std::string id = all.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (!id.empty()) {
+          int v;
+          if (!RNA_property_enum_value(C, ptr, prop, id.c_str(), &v)) {
+            set_err("%s: no enum item %s", key, id.c_str());
+            return false;
+          }
+          acc |= v;
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+      }
+      RNA_property_enum_set(ptr, prop, acc);
+      return true;
+    }
+    default:
+      set_err("%s: pointer/collection operator properties are not supported", key);
+      return false;
+  }
+}
+
+extern "C" bool ujs_operator_call_ex(const char *opname, int32_t n, const char **keys,
+                                     const char **vals, const char *area)
+{
+  bContext *C = ctx();
+  if (C == nullptr) {
+    set_err("no context");
+    return false;
+  }
+  wmOperatorType *ot = WM_operatortype_find(opname, true);
+  if (ot == nullptr) {
+    set_err("unknown operator: %s", opname);
+    return false;
+  }
+  PointerRNA props = WM_operator_properties_create_ptr(ot);
+  for (int i = 0; i < n; i++) {
+    if (!set_prop_from_string(C, &props, keys[i], vals[i])) {
+      WM_operator_properties_free(&props);
+      return false;
+    }
+  }
+  CtxOverride o;
+  if (!ctx_override_begin(C, area, o)) {
+    WM_operator_properties_free(&props);
+    return false;
+  }
+  bool ok = false;
+  if (!WM_operator_poll(C, ot)) {
+    const char *msg = CTX_wm_operator_poll_msg_get(C, nullptr);
+    set_err("%s: poll failed%s%s", opname, msg ? ": " : " (wrong context?)", msg ? msg : "");
+  }
+  else {
+    ReportList reports;
+    BKE_reports_init(&reports, RPT_STORE);
+    wmOperatorStatus status = WM_operator_call_py(
+        C, ot, wm::OpCallContext::ExecDefault, &props, &reports, false);
+    bool had_errors = take_reports(&reports, opname);
+    ok = (status & OPERATOR_FINISHED) && !had_errors;
+    if (!ok && !had_errors) {
+      set_err("operator %s did not finish (%s)", opname,
+              (status & OPERATOR_CANCELLED) ? "cancelled" : "running modal or passed through");
+    }
+  }
+  ctx_override_end(o);
+  WM_operator_properties_free(&props);
+  return ok;
+}
+
+/* ---- RNA function calls -------------------------------------------------------------- */
+
+static double *g_ret_floats = nullptr;
+
+/* Write `v` into parameter slot `data` for parameter `parm`, as bpy does. */
+static bool write_param(bContext *C, PointerRNA *self, PropertyRNA *parm, void *data, const ujs_value &v)
+{
+  const int flag = RNA_property_flag(parm);
+  const int flag_parameter = RNA_parameter_flag(parm);
+  const int len = RNA_property_array_check(parm) ? RNA_property_array_length(self, parm) : 0;
+  const char *pname = RNA_property_identifier(parm);
+  switch (RNA_property_type(parm)) {
+    case PROP_BOOLEAN:
+      if (len > 0) {
+        for (int i = 0; i < len && i < v.len; i++) static_cast<bool *>(data)[i] = v.fa[i] != 0.0;
+      }
+      else {
+        *static_cast<bool *>(data) = v.i != 0;
+      }
+      return true;
+    case PROP_INT:
+      if (len > 0) {
+        if (v.len != len) { set_err("%s wants %d values, got %d", pname, len, v.len); return false; }
+        for (int i = 0; i < len; i++) static_cast<int *>(data)[i] = (int)v.fa[i];
+      }
+      else {
+        *static_cast<int *>(data) = v.type == UJS_PROP_FLOAT ? (int)v.f : (int)v.i;
+      }
+      return true;
+    case PROP_FLOAT:
+      if (len > 0) {
+        if (v.len != len) { set_err("%s wants %d values, got %d", pname, len, v.len); return false; }
+        for (int i = 0; i < len; i++) static_cast<float *>(data)[i] = (float)v.fa[i];
+      }
+      else {
+        *static_cast<float *>(data) = v.type == UJS_PROP_INT ? (float)v.i : (float)v.f;
+      }
+      return true;
+    case PROP_ENUM: {
+      int value = (int)v.i;
+      if (v.s != nullptr && !RNA_property_enum_value(C, self, parm, v.s, &value)) {
+        set_err("%s: no enum item %s", pname, v.s);
+        return false;
+      }
+      *static_cast<int *>(data) = value;
+      return true;
+    }
+    case PROP_STRING: {
+      const char *str = v.s ? v.s : "";
+      if (flag & PROP_THICK_WRAP) {
+        int maxlen = RNA_property_string_maxlength(parm);
+        snprintf(static_cast<char *>(data), maxlen > 0 ? maxlen : 1024, "%s", str);
+      }
+      else {
+        *static_cast<const char **>(data) = str;
+      }
+      return true;
+    }
+    case PROP_POINTER: {
+      PointerRNA arg = as_rna(v.p);
+      StructRNA *want = RNA_property_pointer_type(self, parm);
+      if (v.p.data != nullptr && arg.type != nullptr && !RNA_struct_is_a(arg.type, want)) {
+        set_err("%s: expected %s, got %s", pname, RNA_struct_identifier(want),
+                RNA_struct_identifier(arg.type));
+        return false;
+      }
+      if (flag_parameter & PARM_RNAPTR) {
+        if (flag & PROP_THICK_WRAP) {
+          *static_cast<PointerRNA *>(data) = v.p.data ? arg : PointerRNA{};
+        }
+        else {
+          /* the callee reads through this pointer during the call only */
+          static PointerRNA held[16];
+          static int held_i = 0;
+          PointerRNA *slot = &held[held_i++ % 16];
+          *slot = arg;
+          *static_cast<PointerRNA **>(data) = v.p.data ? slot : nullptr;
+        }
+      }
+      else {
+        *static_cast<void **>(data) = v.p.data;
+      }
+      return true;
+    }
+    default:
+      set_err("%s: collection arguments are not supported", pname);
+      return false;
+  }
+}
+
+/* Read output parameter `parm` from slot `data` into *out. */
+static void read_param(PointerRNA *self, PropertyRNA *parm, ParameterList *list, void *data, ujs_value *out)
+{
+  const int flag = RNA_property_flag(parm);
+  const int flag_parameter = RNA_parameter_flag(parm);
+  int len = 0;
+  if (RNA_property_array_check(parm)) {
+    len = (flag & PROP_DYNAMIC) ? RNA_parameter_dynamic_length_get(list, parm) :
+                                  RNA_property_array_length(self, parm);
+  }
+  memset(out, 0, sizeof *out);
+  out->type = UJS_VAL_NONE;
+  switch (RNA_property_type(parm)) {
+    case PROP_BOOLEAN:
+    case PROP_INT:
+    case PROP_FLOAT:
+      if (len > 0) {
+        free(g_ret_floats);
+        g_ret_floats = (double *)malloc(len * sizeof(double));
+        for (int i = 0; i < len; i++) {
+          switch (RNA_property_type(parm)) {
+            case PROP_BOOLEAN: g_ret_floats[i] = static_cast<bool *>(data)[i]; break;
+            case PROP_INT: g_ret_floats[i] = static_cast<int *>(data)[i]; break;
+            default: g_ret_floats[i] = static_cast<float *>(data)[i]; break;
+          }
+        }
+        out->type = UJS_PROP_FLOAT;
+        out->fa = g_ret_floats;
+        out->len = len;
+      }
+      else if (RNA_property_type(parm) == PROP_BOOLEAN) {
+        out->type = UJS_PROP_BOOL;
+        out->i = *static_cast<bool *>(data);
+      }
+      else if (RNA_property_type(parm) == PROP_INT) {
+        out->type = UJS_PROP_INT;
+        out->i = *static_cast<int *>(data);
+      }
+      else {
+        out->type = UJS_PROP_FLOAT;
+        out->f = *static_cast<float *>(data);
+      }
+      return;
+    case PROP_ENUM: {
+      out->type = UJS_PROP_ENUM;
+      out->i = *static_cast<int *>(data);
+      const char *id = nullptr;
+      if (RNA_property_enum_identifier(nullptr, self, parm, (int)out->i, &id) && id) {
+        snprintf(g_str_buf, sizeof g_str_buf, "%s", id);
+        out->s = g_str_buf;
+      }
+      return;
+    }
+    case PROP_STRING: {
+      const char *str = (flag & PROP_THICK_WRAP) ? static_cast<const char *>(data) :
+                                                   *static_cast<const char **>(data);
+      snprintf(g_str_buf, sizeof g_str_buf, "%s", str ? str : "");
+      out->type = UJS_PROP_STRING;
+      out->s = g_str_buf;
+      return;
+    }
+    case PROP_POINTER: {
+      StructRNA *ptype = RNA_property_pointer_type(self, parm);
+      PointerRNA res;
+      if (flag_parameter & PARM_RNAPTR) {
+        res = (flag & PROP_THICK_WRAP) ? *static_cast<PointerRNA *>(data) :
+                                         **static_cast<PointerRNA **>(data);
+      }
+      else {
+        void *p = *static_cast<void **>(data);
+        if (p == nullptr) {
+          res = PointerRNA{};
+        }
+        else if (RNA_struct_is_ID(ptype)) {
+          res = RNA_id_pointer_create(static_cast<ID *>(p));
+        }
+        else {
+          res = RNA_pointer_create_discrete(self->owner_id, ptype, p);
+        }
+      }
+      out->type = UJS_PROP_POINTER;
+      out->p = as_ujs(res);
+      return;
+    }
+    default:
+      return;
+  }
+}
+
+extern "C" bool ujs_func_call(ujs_pointer self_p, const char *fname, int32_t n,
+                              const char **names, const ujs_value *args, ujs_value *ret)
+{
+  bContext *C = ctx();
+  PointerRNA self = as_rna(self_p);
+  if (self.type == nullptr) {
+    set_err("invalid pointer");
+    return false;
+  }
+  FunctionRNA *func = RNA_struct_find_function(self.type, fname);
+  if (func == nullptr) {
+    set_err("%s has no function %s", RNA_struct_identifier(self.type), fname);
+    return false;
+  }
+  ParameterList list;
+  RNA_parameter_list_create(&list, &self, func);
+
+  /* named args */
+  for (int i = 0; i < n; i++) {
+    PropertyRNA *parm = RNA_function_find_parameter(&self, func, names[i]);
+    if (parm == nullptr || (RNA_parameter_flag(parm) & PARM_OUTPUT)) {
+      set_err("%s.%s has no argument %s", RNA_struct_identifier(self.type), fname, names[i]);
+      RNA_parameter_list_free(&list);
+      return false;
+    }
+    void *data;
+    RNA_parameter_get(&list, parm, &data);
+    if (!write_param(C, &self, parm, data, args[i])) {
+      RNA_parameter_list_free(&list);
+      return false;
+    }
+  }
+  /* required args present? */
+  ParameterIterator iter;
+  RNA_parameter_list_begin(&list, &iter);
+  for (; iter.valid; RNA_parameter_list_next(&iter)) {
+    PropertyRNA *parm = iter.parm;
+    if (!(RNA_parameter_flag(parm) & PARM_REQUIRED) || (RNA_parameter_flag(parm) & PARM_OUTPUT)) {
+      continue;
+    }
+    bool given = false;
+    for (int i = 0; i < n; i++) {
+      if (strcmp(names[i], RNA_property_identifier(parm)) == 0) given = true;
+    }
+    if (!given) {
+      set_err("%s.%s: missing required argument %s", RNA_struct_identifier(self.type), fname,
+              RNA_property_identifier(parm));
+      RNA_parameter_list_end(&iter);
+      RNA_parameter_list_free(&list);
+      return false;
+    }
+  }
+  RNA_parameter_list_end(&iter);
+
+  ReportList reports;
+  BKE_reports_init(&reports, RPT_STORE);
+  RNA_function_call(C, &reports, &self, func, &list);
+  if (take_reports(&reports, fname)) {
+    RNA_parameter_list_free(&list);
+    return false;
+  }
+
+  memset(ret, 0, sizeof *ret);
+  ret->type = UJS_VAL_NONE;
+  RNA_parameter_list_begin(&list, &iter);
+  for (; iter.valid; RNA_parameter_list_next(&iter)) {
+    if (RNA_parameter_flag(iter.parm) & PARM_OUTPUT) {
+      void *data;
+      RNA_parameter_get(&list, iter.parm, &data);
+      read_param(&self, iter.parm, &list, data, ret);
+      break;
+    }
+  }
+  RNA_parameter_list_end(&iter);
+  RNA_parameter_list_free(&list);
+
+  /* creation/removal through functions changes the scene graph */
+  if (self.owner_id) DEG_id_tag_update(self.owner_id, ID_RECALC_SYNC_TO_EVAL);
+  DEG_relations_tag_update(G_MAIN);
+  WM_main_add_notifier(NC_WINDOW, nullptr);
+  return true;
+}
+
+/* ---- collection lookup and bulk access ---------------------------------------------- */
+
+extern "C" bool ujs_coll_ptr(ujs_pointer owner, const char *name, ujs_pointer *out)
+{
+  PropertyRNA *prop = find_prop_typed(owner, name, PROP_COLLECTION);
+  if (prop == nullptr) return false;
+  PointerRNA ptr = as_rna(owner);
+  std::optional<PointerRNA> c_ptr = RNA_property_collection_type_get(&ptr, prop);
+  if (!c_ptr.has_value() || c_ptr->type == nullptr) {
+    set_err("collection %s has no functions", name);
+    return false;
+  }
+  *out = as_ujs(*c_ptr);
+  return true;
+}
+
+extern "C" bool ujs_set_enum_id(ujs_pointer owner, const char *name, const char *ids)
+{
+  PropertyRNA *prop = find_prop_typed(owner, name, PROP_ENUM);
+  if (prop == nullptr) return false;
+  PointerRNA ptr = as_rna(owner);
+  int acc = 0;
+  std::string all(ids);
+  size_t start = 0;
+  while (true) {
+    size_t end = all.find(',', start);
+    std::string id = all.substr(start, end == std::string::npos ? std::string::npos : end - start);
+    if (!id.empty()) {
+      int v;
+      if (!RNA_property_enum_value(ctx(), &ptr, prop, id.c_str(), &v)) {
+        set_err("%s: no enum item %s", name, id.c_str());
+        return false;
+      }
+      acc |= v;
+    }
+    if (end == std::string::npos) break;
+    start = end + 1;
+  }
+  RNA_property_enum_set(&ptr, prop, acc);
+  prop_updated(ptr, prop);
+  return true;
+}
+
+extern "C" bool ujs_coll_lookup(ujs_pointer owner, const char *name, const char *key,
+                                int64_t index, ujs_pointer *out)
+{
+  PropertyRNA *prop = find_prop_typed(owner, name, PROP_COLLECTION);
+  if (prop == nullptr) return false;
+  PointerRNA ptr = as_rna(owner);
+  PointerRNA item;
+  bool found = key ? RNA_property_collection_lookup_string(&ptr, prop, key, &item) :
+                     RNA_property_collection_lookup_int(&ptr, prop, (int)index, &item);
+  if (!found) {
+    if (key) set_err("%s has no item %s", name, key);
+    else set_err("%s index %lld out of range", name, (long long)index);
+    return false;
+  }
+  *out = as_ujs(item);
+  return true;
+}
+
+static bool foreach_raw(ujs_pointer owner, const char *name, const char *attr, double *buf,
+                        int64_t len, bool set)
+{
+  PropertyRNA *prop = find_prop_typed(owner, name, PROP_COLLECTION);
+  if (prop == nullptr) return false;
+  PointerRNA ptr = as_rna(owner);
+  ReportList reports;
+  BKE_reports_init(&reports, RPT_STORE);
+  int ok = set ? RNA_property_collection_raw_set(&reports, &ptr, prop, attr, buf, PROP_RAW_DOUBLE, (int)len) :
+                 RNA_property_collection_raw_get(&reports, &ptr, prop, attr, buf, PROP_RAW_DOUBLE, (int)len);
+  if (take_reports(&reports, set ? "foreach_set" : "foreach_get")) return false;
+  if (!ok) {
+    set_err("foreach %s.%s failed (length %lld mismatch?)", name, attr, (long long)len);
+    return false;
+  }
+  if (set && ptr.owner_id) {
+    DEG_id_tag_update(ptr.owner_id, ID_RECALC_GEOMETRY);
+    WM_main_add_notifier(NC_GEOM | ND_DATA, ptr.owner_id);
+  }
+  return true;
+}
+
+extern "C" bool ujs_coll_foreach_get(ujs_pointer owner, const char *name, const char *attr,
+                                     double *buf, int64_t len)
+{
+  return foreach_raw(owner, name, attr, buf, len, false);
+}
+
+extern "C" bool ujs_coll_foreach_set(ujs_pointer owner, const char *name, const char *attr,
+                                     const double *buf, int64_t len)
+{
+  return foreach_raw(owner, name, attr, const_cast<double *>(buf), len, true);
+}
+
+/* ---- int/bool arrays ---------------------------------------------------------------- */
+
+extern "C" bool ujs_get_int_array(ujs_pointer owner, const char *name, int64_t **out, int32_t *len)
+{
+  PropertyRNA *prop = find_prop(owner, name);
+  if (prop == nullptr) return false;
+  PointerRNA ptr = as_rna(owner);
+  PropertyType t = RNA_property_type(prop);
+  if ((t != PROP_INT && t != PROP_BOOLEAN) || !RNA_property_array_check(prop)) {
+    set_err("not an int/bool array property: %s", name);
+    return false;
+  }
+  int n = RNA_property_array_length(&ptr, prop);
+  int64_t *d = (int64_t *)malloc((n > 0 ? n : 1) * sizeof(int64_t));
+  if (t == PROP_INT) {
+    int *tmp = (int *)malloc((n > 0 ? n : 1) * sizeof(int));
+    RNA_property_int_get_array(&ptr, prop, tmp);
+    for (int i = 0; i < n; i++) d[i] = tmp[i];
+    free(tmp);
+  }
+  else {
+    bool *tmp = (bool *)malloc((n > 0 ? n : 1) * sizeof(bool));
+    RNA_property_boolean_get_array(&ptr, prop, tmp);
+    for (int i = 0; i < n; i++) d[i] = tmp[i];
+    free(tmp);
+  }
+  *out = d;
+  *len = n;
+  return true;
+}
+
+extern "C" bool ujs_set_int_array(ujs_pointer owner, const char *name, const int64_t *v, int32_t len)
+{
+  PropertyRNA *prop = find_prop(owner, name);
+  if (prop == nullptr) return false;
+  PointerRNA ptr = as_rna(owner);
+  PropertyType t = RNA_property_type(prop);
+  if ((t != PROP_INT && t != PROP_BOOLEAN) || !RNA_property_array_check(prop)) {
+    set_err("not an int/bool array property: %s", name);
+    return false;
+  }
+  int n = RNA_property_array_length(&ptr, prop);
+  if (n != len) {
+    set_err("array length mismatch: property has %d, caller sent %d", n, len);
+    return false;
+  }
+  if (t == PROP_INT) {
+    int *tmp = (int *)malloc((n > 0 ? n : 1) * sizeof(int));
+    for (int i = 0; i < n; i++) tmp[i] = (int)v[i];
+    RNA_property_int_set_array(&ptr, prop, tmp);
+    free(tmp);
+  }
+  else {
+    bool *tmp = (bool *)malloc((n > 0 ? n : 1) * sizeof(bool));
+    for (int i = 0; i < n; i++) tmp[i] = v[i] != 0;
+    RNA_property_boolean_set_array(&ptr, prop, tmp);
+    free(tmp);
+  }
+  prop_updated(ptr, prop);
   return true;
 }
 
