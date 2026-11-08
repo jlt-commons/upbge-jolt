@@ -19,15 +19,10 @@
          jlt-commons/ebb {:git/url "https://github.com/jlt-commons/ebb"
                           :git/sha "db4d72d12af7c961d40c70be924e03cfe2d6c959"}}
 
- ;; native/upbge_shim.c is compiled against the host UPBGE build. The dylib
- ;; ships beside the source, path-qualified so it loads relative to this
- ;; project, not to wherever the host app runs from. Optional: the core
- ;; runtime (queue/marshal/nREPL) is testable without it; the bridge
- ;; namespaces require it.
- :jolt/native [{:name "upbge"
-                :darwin ["native/libupbge_shim.dylib"]
-                :linux  ["native/libupbge_shim.so"]
-                :optional true}]
+ ;; No :jolt/native: the bridge's ujs_* symbols resolve from the host
+ ;; process (the real shim is compiled into the UPBGE binary). A declared
+ ;; native would be searched first and shadow it. Tests load the mock shim
+ ;; (native/libupbge_shim.dylib) explicitly, see test/upbge_jolt/mock_host.clj.
 
  :aliases {:test {:extra-paths ["test"]
                   :main-opts   ["-m" "upbge-jolt.test-runner"]}
