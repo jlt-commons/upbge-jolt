@@ -64,8 +64,13 @@ Two directions of calling:
 - `host/upbgejolt_shim.cc` — the real shim over RNA (Blender 4.x API).
 - `host/upbge_jolt.cc` — host integration: `uj_host_init` / `uj_host_tick`
   (dlopen `libjolt_upbge`, start the nREPL server, point the shim at the scene).
-- `host/upbge_jolt_bootstrap.py` — Python bootstrap: loads the runtime and
+- `host/upbge_jolt_bootstrap.py` — headless bootstrap: loads the runtime and
   pumps `uj_host_tick` on the main thread (run with `blender -b --python ...`).
+- `host/upbge_jolt_bootstrap_editor.py` — windowed editor bootstrap: pumps
+  `uj_host_tick` from a `bpy.app.timers` callback so REPL edits show live.
+- `host/upbge_jolt_bootstrap_game.py` — windowed game bootstrap: starts the
+  game once the window has drawn; the game loop pumps the tick.
+- `host/upbge_jolt_portfile.py` — writes `.nrepl-port` for the bootstraps.
 - `host/integrate.sh` — drops the shim + integration into a cloned UPBGE
   tree, applies the build fixes, configures and builds.
 - `test/` — clojure.test suites + runner.
@@ -97,8 +102,21 @@ UPBGE_JOLT_LIB=$PWD/libjolt_upbge.dylib \
   --background --python host/upbge_jolt_bootstrap.py
 ```
 
-The bootstrap prints the nREPL port; connect an editor and evaluate against
-the live scene (see the README top).
+Every bootstrap writes the port to `.nrepl-port` in the project root
+(override with `UPBGE_JOLT_PORT_FILE`) and removes it on exit, so editors and
+agent nREPL tools autodiscover it.
+
+Build a scene interactively in the editor (windowed, live viewport):
+
+```
+UPBGE_JOLT_LIB=$PWD/libjolt_upbge.dylib \
+  native/upbge/build_darwin/bin/Blender.app/Contents/MacOS/Blender \
+  --python host/upbge_jolt_bootstrap_editor.py
+```
+
+A timer pumps `uj_tick` at 60 Hz and redraws the 3D viewport, so `bpy`
+edits from the REPL appear immediately. Press P in the viewport (or
+`(bpy/ops "view3d.game_start")`) to play the scene.
 
 Run the game engine (windowed — no `--background`):
 
@@ -145,8 +163,9 @@ it on the frame. Reentrant calls (from inside a tick-drained op) run inline.
 - [x] Engine layer (KX): `ujs_kx_*` / `upbge-jolt.bge` accesses the running
       game's `KX_GameObject`s (name, world position) — verified against the
       live game engine (windowed; the game loop pumps `uj_tick`)
+- [x] Editor-side pump (`bpy.app.timers`) for live editing in the windowed
+      editor; game-side tick from NextFrame
 - unchecked box = in progress or planned
-- Editor-side pump via WM_event_timer_add; game-side tick from NextFrame
 
 ## License
 
