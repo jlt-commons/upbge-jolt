@@ -649,7 +649,10 @@ extern "C" bool ujs_coll_remove(ujs_pointer coll, const char *name, ujs_pointer 
     set_err("not a collection property");
     return false;
   }
-  BKE_collection_object_remove(G_MAIN, col, static_cast<Object *>(mptr.data), false);
+  /* Scene.objects lists objects in every collection of the scene, not just
+   * the master one, so unlinking from it must remove from all of them. */
+  BKE_scene_collections_object_remove(G_MAIN, static_cast<Scene *>(as_rna(coll).data),
+                                      static_cast<Object *>(mptr.data), false);
   DEG_id_tag_update(&col->id, ID_RECALC_SYNC_TO_EVAL);
   DEG_relations_tag_update(G_MAIN);
   WM_main_add_notifier(NC_SCENE | ND_LAYER_CONTENT, nullptr);
@@ -671,7 +674,13 @@ extern "C" bool ujs_operator_call(const char *opname)
   }
   wmOperatorStatus status = WM_operator_name_call(
       C, opname, wm::OpCallContext::ExecDefault, nullptr, nullptr);
-  return status & OPERATOR_FINISHED;
+  if (!(status & OPERATOR_FINISHED)) {
+    set_err("operator %s did not finish (%s)", opname,
+            (status & OPERATOR_CANCELLED) ? "cancelled: poll failed or needs arguments" :
+                                            "running modal or passed through");
+    return false;
+  }
+  return true;
 }
 
 /* ---- KX engine (the running game) -------------------------------------------- */
