@@ -100,6 +100,18 @@ UPBGE_JOLT_LIB=$PWD/libjolt_upbge.dylib \
 The bootstrap prints the nREPL port; connect an editor and evaluate against
 the live scene (see the README top).
 
+Run the game engine (windowed — no `--background`):
+
+```
+UPBGE_JOLT_LIB=$PWD/libjolt_upbge.dylib \
+  native/upbge/build_darwin/bin/Blender.app/Contents/MacOS/Blender \
+  --python host/upbge_jolt_bootstrap_game.py
+```
+
+This starts the nREPL server, starts the game in the viewport, and the game
+loop pumps `uj_tick` each frame (hooked into `KX_KetsjiEngine::NextFrame`),
+so `upbge-jolt.bge` reaches the running `KX_GameObject`s.
+
 ## Threading contract
 
 One jolt runtime per process. After `jolt_library_init`, the init thread
@@ -130,9 +142,9 @@ it on the frame. Reentrant calls (from inside a tick-drained op) run inline.
       "mesh.primitive_cube_add") — verified against the live engine
 - [x] Engine layer (frame events): `core/frame-flow` emits the tick count each
       host frame as an ebb flow — the per-frame seam for driving the engine
-- [ ] Engine layer (KX scene/objects, sensors, input) — needs the game engine
-      running; `WM_init_game` requires a window + 3D view area, which
-      `--background` mode lacks
+- [x] Engine layer (KX): `ujs_kx_*` / `upbge-jolt.bge` accesses the running
+      game's `KX_GameObject`s (name, world position) — verified against the
+      live game engine (windowed; the game loop pumps `uj_tick`)
 - unchecked box = in progress or planned
 - Editor-side pump via WM_event_timer_add; game-side tick from NextFrame
 

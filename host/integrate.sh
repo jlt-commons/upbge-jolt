@@ -34,11 +34,24 @@ set(INC
   ../makesrna
   ../python/intern
   ../windowmanager
+  ../../gameengine/Common
+  ../../gameengine/Converter
+  ../../gameengine/Device
+  ../../gameengine/Expressions
+  ../../gameengine/GameLogic
+  ../../gameengine/Ketsji
+  ../../gameengine/Launcher
+  ../../gameengine/Physics/Common
+  ../../gameengine/Rasterizer
+  ../../gameengine/Rasterizer/RAS_OpenGLRasterizer
+  ../../gameengine/SceneGraph
   ../../../intern/guardedalloc
   ${PYTHON_INCLUDE_DIR}
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
 )
-set(INC_SYS)
+set(INC_SYS
+  ../../../intern/moto/include
+)
 set(SRC
   upbgejolt_shim.cc
   upbge_jolt.cc
@@ -79,6 +92,24 @@ for f in \
   grep -q "unconditionally, even on macOS" "$UPBGE/$f" || \
     sed -i '' 's|^if(WITH_OPENGL_BACKEND)$|if(WITH_OPENGL_BACKEND)\n  add_definitions(-DWITH_OPENGL_BACKEND)\nendif()\n\nlist(APPEND LIB\n  PRIVATE bf::dependencies::epoxy\n)|' "$UPBGE/$f"
 done
+
+# --- blenderplayer references a removed extern_draco target -----------------
+grep -q "TARGET extern_draco" "$UPBGE/source/blenderplayer/CMakeLists.txt" && \
+  sed -i '' 's|if(WITH_DRACO)|if(WITH_DRACO AND TARGET extern_draco)|' \
+  "$UPBGE/source/blenderplayer/CMakeLists.txt"
+
+# --- EEVEE shader uses `kernel`, a Metal reserved word -----------------------
+sed -i '' 's/const float kernel\[9\]/const float gaussian_kernel[9]/; s/const float kernel_sum/const float gaussian_kernel_sum/; s/vis \* kernel\[ki++\]/vis * gaussian_kernel[ki++]/; s/vis_sum \/ kernel_sum/vis_sum \/ gaussian_kernel_sum/' \
+  "$UPBGE/source/blender/draw/engines/eevee/shaders/eevee_shadow_tracing.bsl.hh"
+
+# --- game-side tick: drain the jolt op queue from the game loop -------------
+grep -q "uj_host_tick()" "$UPBGE/source/gameengine/Ketsji/KX_KetsjiEngine.cpp" || \
+  sed -i '' 's|^using namespace blender;$|using namespace blender;\n\nextern "C" int uj_host_tick();|' \
+  "$UPBGE/source/gameengine/Ketsji/KX_KetsjiEngine.cpp"
+
+grep -q "uj_host_tick()" "$UPBGE/source/gameengine/Ketsji/KX_KetsjiEngine.cpp" || \
+  sed -i '' 's|^  return m_doRender;$|  uj_host_tick();\n\n  return m_doRender;|' \
+  "$UPBGE/source/gameengine/Ketsji/KX_KetsjiEngine.cpp"
 
 # --- configure + build ------------------------------------------------------
 NPROC="$(sysctl -n hw.ncpu 2>/dev/null || nproc)"

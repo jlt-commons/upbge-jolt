@@ -511,23 +511,29 @@
 
 ;; --- KX engine (the running game) ---------------------------------------------
 
+(defn- kx-object-at
+  "Read the KX object at `i` into a pointer map (nil when out of range)."
+  [i]
+  (let [o (ffi/alloc ptr-size)]
+    (try
+      (when (ujs-kx-object-at i o) (read-ptr! o))
+      (finally (ffi/free o)))))
+
+(defn- kx-objects*
+  "The tick-thread body of `kx-objects`."
+  []
+  (let [out (ffi/alloc 8)]
+    (try
+      (if (ujs-kx-object-count out)
+        (vec (map kx-object-at (range (ffi/read out :int64))))
+        (host-error nil))
+      (finally (ffi/free out)))))
+
 (defn kx-objects
   "All KX objects in the running game, as pointer maps. Empty when no game is
   running."
   []
-  (core/marshal
-   (fn []
-     (let [out (ffi/alloc 8)]
-       (try
-         (if (ujs-kx-object-count out)
-           (let [n (ffi/read out :int64)]
-             (vec (for [i (range n)]
-                    (let [o (ffi/alloc ptr-size)]
-                      (try
-                        (when (ujs-kx-object-at i o) (read-ptr! o))
-                        (finally (ffi/free o)))))))
-           (host-error nil))
-         (finally (ffi/free out)))))))
+  (core/marshal kx-objects*))
 
 (defn kx-object
   "Find a KX object by name; nil when absent."
