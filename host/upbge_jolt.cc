@@ -95,6 +95,16 @@ extern "C" int uj_host_init()
   }
   fprintf(stderr, "upbge-jolt: nREPL listening on port %d\n", port);
 
+  /* This thread now goes back to Blender's own loop and only re-enters jolt
+   * through uj_tick (:collect-safe). Release it, or every collection started
+   * on an nREPL thread waits until the next tick for this thread to reach a
+   * safe point -- and forever if Blender blocks (modal dialog, game paused). */
+  typedef void (*uj_release_thread_fn)(void);
+  uj_release_thread_fn release = (uj_release_thread_fn)dlsym(g_lib, "jolt_library_release_thread");
+  if (release != nullptr) {
+    release();
+  }
+
   g_started = 1;
   return port;
 }

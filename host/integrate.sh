@@ -29,6 +29,7 @@ cat > "$SRC/CMakeLists.txt" <<'CMAKE'
 set(INC
   .
   ../blenkernel
+  ../depsgraph
   ../blenlib
   ../makesdna
   ../makesrna
@@ -64,6 +65,31 @@ set(LIB
   bf_rna
   bf_windowmanager
 )
+# The shim calls into KX classes whose layout and vtables depend on these
+# (EXP_Value has WITH_PYTHON-only virtuals), so it must see the same defines
+# the gameengine compiles with, or virtual calls dispatch to the wrong slot.
+if(WITH_PYTHON)
+  add_definitions(-DWITH_PYTHON)
+endif()
+if(WITH_GAMEENGINE)
+  add_definitions(-DWITH_GAMEENGINE)
+endif()
+if(WITH_BULLET)
+  list(APPEND INC ../../gameengine/Physics/Bullet)
+  list(APPEND INC_SYS ${BULLET_INCLUDE_DIRS})
+  add_definitions(-DWITH_BULLET)
+endif()
+if(WITH_AUDASPACE)
+  list(APPEND INC_SYS ${AUDASPACE_C_INCLUDE_DIRS})
+  add_definitions(-DWITH_AUDASPACE)
+endif()
+if(WITH_SDL)
+  list(APPEND INC_SYS ${SDL_INCLUDE_DIR})
+  add_definitions(-DWITH_SDL)
+endif()
+if(WITH_CODEC_FFMPEG)
+  add_definitions(-DWITH_FFMPEG)
+endif()
 blender_add_lib(bf_upbge_jolt "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
 CMAKE
 
@@ -82,24 +108,51 @@ grep -q "force_load,\$<TARGET_FILE:bf_upbge_jolt>" "$UPBGE/source/creator/CMakeL
   "$UPBGE/source/creator/CMakeLists.txt"
 
 # --- clang 17: [[deprecated]] on a type is only legal in C++23 --------------
-sed -i '' 's|#    define DNA_DEPRECATED \[\[deprecated\]\]|#    define DNA_DEPRECATED __attribute__((deprecated))|' \
+grep -q '#    define DNA_DEPRECATED \[\[deprecated\]\]' "$UPBGE/source/blender/makesdna/DNA_defs.h" && \
+  sed -i '' 's|#    define DNA_DEPRECATED \[\[deprecated\]\]|#    define DNA_DEPRECATED __attribute__((deprecated))|' \
   "$UPBGE/source/blender/makesdna/DNA_defs.h"
 
 # --- game engine needs epoxy on macOS (WITH_OPENGL_BACKEND forced off) ------
+# Move the epoxy link out of the WITH_OPENGL_BACKEND guard. Exact-block
+# replacement, tagged with a marker so a rerun leaves a patched file alone.
 for f in \
   source/gameengine/Rasterizer/RAS_OpenGLRasterizer/CMakeLists.txt \
   source/gameengine/VideoTexture/CMakeLists.txt; do
-  grep -q "unconditionally, even on macOS" "$UPBGE/$f" || \
-    sed -i '' 's|^if(WITH_OPENGL_BACKEND)$|if(WITH_OPENGL_BACKEND)\n  add_definitions(-DWITH_OPENGL_BACKEND)\nendif()\n\nlist(APPEND LIB\n  PRIVATE bf::dependencies::epoxy\n)|' "$UPBGE/$f"
+  grep -q "upbge-jolt: epoxy" "$UPBGE/$f" || python3 - "$UPBGE/$f" <<'PY'
+import sys
+path = sys.argv[1]
+old = """if(WITH_OPENGL_BACKEND)
+  list(APPEND LIB
+    PRIVATE bf::dependencies::epoxy
+  )
+  add_definitions(-DWITH_OPENGL_BACKEND)
+endif()
+"""
+new = """if(WITH_OPENGL_BACKEND)
+  add_definitions(-DWITH_OPENGL_BACKEND)
+endif()
+
+# upbge-jolt: epoxy is used unconditionally, even on macOS where the UI
+# runs on Metal and WITH_OPENGL_BACKEND is forced off.
+list(APPEND LIB
+  PRIVATE bf::dependencies::epoxy
+)
+"""
+src = open(path).read()
+if old not in src:
+    sys.exit(f"integrate.sh: epoxy block not found in {path}")
+open(path, "w").write(src.replace(old, new, 1))
+PY
 done
 
 # --- blenderplayer references a removed extern_draco target -----------------
-grep -q "TARGET extern_draco" "$UPBGE/source/blenderplayer/CMakeLists.txt" && \
+grep -q "if(WITH_DRACO AND TARGET extern_draco)" "$UPBGE/source/blenderplayer/CMakeLists.txt" || \
   sed -i '' 's|if(WITH_DRACO)|if(WITH_DRACO AND TARGET extern_draco)|' \
   "$UPBGE/source/blenderplayer/CMakeLists.txt"
 
 # --- EEVEE shader uses `kernel`, a Metal reserved word -----------------------
-sed -i '' 's/const float kernel\[9\]/const float gaussian_kernel[9]/; s/const float kernel_sum/const float gaussian_kernel_sum/; s/vis \* kernel\[ki++\]/vis * gaussian_kernel[ki++]/; s/vis_sum \/ kernel_sum/vis_sum \/ gaussian_kernel_sum/' \
+grep -q 'const float kernel\[9\]' "$UPBGE/source/blender/draw/engines/eevee/shaders/eevee_shadow_tracing.bsl.hh" && \
+  sed -i '' 's/const float kernel\[9\]/const float gaussian_kernel[9]/; s/const float kernel_sum/const float gaussian_kernel_sum/; s/vis \* kernel\[ki++\]/vis * gaussian_kernel[ki++]/; s/vis_sum \/ kernel_sum/vis_sum \/ gaussian_kernel_sum/' \
   "$UPBGE/source/blender/draw/engines/eevee/shaders/eevee_shadow_tracing.bsl.hh"
 
 # --- game-side tick: drain the jolt op queue from the game loop -------------
