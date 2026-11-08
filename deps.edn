@@ -27,8 +27,18 @@
                   :main-opts   ["-m" "upbge-jolt.test-runner"]}}
 
  :tasks {:requires ([babashka.fs :as fs])
-         :init (def shlib (str "native/libupbge_shim."
-                               (if (re-find #"^Mac" (System/getProperty "os.name")) "dylib" "so")))
+         :init (do (def mac? (some? (re-find #"^Mac" (System/getProperty "os.name"))))
+                   (def shlib (str "native/libupbge_shim." (if mac? "dylib" "so")))
+                   ;; the UPBGE checkout and its build tree (GNUmakefile puts
+                   ;; BUILD_DIR at dirname-of-source/build_$(OS), i.e. inside
+                   ;; native/ when the clone lives there)
+                   (def upbge-src "native/upbge")
+                   (def upbge-build "native/build_darwin")
+                   (def blender-bin "native/build_darwin/bin/Blender.app/Contents/MacOS/Blender")
+                   ;; make deps harvests the prebuilt platform libs into the
+                   ;; clone's lib/macos_arm64 (before that the dir holds only
+                   ;; deps.md from the repo), so any harvested lib marks deps done
+                   (def deps-marker "native/upbge/lib/macos_arm64/imath"))
 
          native
          {:doc "build the mock host shim dylib (for tests; the real shim needs a UPBGE build)"
@@ -40,6 +50,27 @@
                   (println "up to date:" shlib))}
 
          test {:doc "unit tests (headless, mock shim)" :depends [native] :task (shell "jolt -M:test")}
+
+         upbge-deps
+         {:doc "clone UPBGE into native/upbge and build its dependencies (skipped once harvested)"
+          :task (if (fs/exists? deps-marker)
+                  (println "upbge-deps: up to date -" deps-marker)
+                  (do (when-not (fs/exists? upbge-src)
+                        (shell "git" "clone" "https://github.com/UPBGE/upbge.git" upbge-src))
+                      ;; CMake 4.x dropped <3.5 compat; most UPBGE externals
+                      ;; (openal, x265, ...) still declare it. Env var rather
+                      ;; than -D so it reaches the ExternalProject sub-configures.
+                      (shell "env" "CMAKE_POLICY_VERSION_MINIMUM=3.5"
+                             "make" "-C" upbge-src "-j"
+                             (str (.availableProcessors (Runtime/getRuntime))) "deps")))}
+
+         upbge
+         {:doc "build the full UPBGE/Blender binary (deps first; skipped once built)"
+          :depends [upbge-deps]
+          :task (if (fs/exists? blender-bin)
+                  (println "upbge: up to date -" blender-bin)
+                  (shell "make" "-C" upbge-src "-j"
+                         (str (.availableProcessors (Runtime/getRuntime)))))}
 
          lib
          {:doc "build libjolt_upbge.{dylib,so} via jolt build --library"

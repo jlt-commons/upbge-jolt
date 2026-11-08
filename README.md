@@ -67,9 +67,11 @@ Two directions of calling:
 ## Tasks
 
 ```
-jolt task native   # build the mock shim dylib
-jolt task test     # unit tests (headless, mock shim)
-jolt task lib      # build libjolt_upbge.dylib (--library)
+jolt native   # build the mock shim dylib
+jolt test     # unit tests (headless, mock shim)
+jolt lib      # build libjolt_upbge.dylib (--library)
+jolt upbge-deps  # clone UPBGE into native/upbge + build its dependencies
+jolt upbge       # build the full UPBGE/Blender binary (deps first)
 ```
 
 Harness (embedding contract check):

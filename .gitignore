@@ -4,5 +4,7 @@ libjolt_upbge.so
 libjolt_upbge.so.build/
 native/libupbge_shim.dylib
 native/libupbge_shim.so
+native/upbge/
+native/build_darwin/
 .nrepl-port
 .cpcache/
