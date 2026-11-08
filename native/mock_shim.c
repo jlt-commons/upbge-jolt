@@ -49,6 +49,15 @@ static int g_nobjects = 0;
 static char g_last_error[256];
 static char g_str_buf[128]; /* returned strings, valid until the next call */
 
+/* toy KX (running-game) objects: a separate table from the RNA objects */
+typedef struct {
+  char name[64];
+  double pos[3];
+} mock_kx_obj;
+
+static mock_kx_obj g_kx[8];
+static int g_nkx = 0;
+
 static void set_err(const char *msg) {
   snprintf(g_last_error, sizeof g_last_error, "%s", msg);
 }
@@ -136,6 +145,15 @@ void ujs_test_reset(void) {
   verts->v.dyn[0] = 0; verts->v.dyn[1] = 0; verts->v.dyn[2] = 0;
   verts->v.dyn[3] = 1; verts->v.dyn[4] = 0; verts->v.dyn[5] = 0;
   verts->v.dyn[6] = 0; verts->v.dyn[7] = 1; verts->v.dyn[8] = 0;
+
+  /* two toy KX objects in the "running game" */
+  g_nkx = 0;
+  snprintf(g_kx[g_nkx].name, sizeof g_kx[g_nkx].name, "GameCube");
+  g_kx[g_nkx].pos[0] = 1; g_kx[g_nkx].pos[1] = 2; g_kx[g_nkx].pos[2] = 3;
+  g_nkx++;
+  snprintf(g_kx[g_nkx].name, sizeof g_kx[g_nkx].name, "GameSphere");
+  g_kx[g_nkx].pos[0] = 4; g_kx[g_nkx].pos[1] = 5; g_kx[g_nkx].pos[2] = 6;
+  g_nkx++;
 }
 
 /* --- error / root --------------------------------------------------------- */
@@ -509,6 +527,59 @@ bool ujs_operator_call(const char *opname) {
   }
   set_err("unknown operator");
   return false;
+}
+
+/* --- KX engine (running game) -------------------------------------------- */
+
+static mock_kx_obj *kx_of(ujs_pointer p) {
+  if (!p.data) return NULL;
+  for (int i = 0; i < g_nkx; i++)
+    if (&g_kx[i] == p.data) return &g_kx[i];
+  return NULL;
+}
+
+bool ujs_kx_object_count(int64_t *out) {
+  *out = g_nkx;
+  return true;
+}
+
+bool ujs_kx_object_at(int64_t index, ujs_pointer *out) {
+  if (index < 0 || index >= g_nkx) { set_err("index out of range"); return false; }
+  out->owner = 0; out->type = 0; out->data = &g_kx[index];
+  return true;
+}
+
+bool ujs_kx_object_find(const char *name, ujs_pointer *out) {
+  for (int i = 0; i < g_nkx; i++) {
+    if (strcmp(g_kx[i].name, name) == 0) {
+      out->owner = 0; out->type = 0; out->data = &g_kx[i];
+      return true;
+    }
+  }
+  set_err("no such object");
+  return false;
+}
+
+bool ujs_kx_name(ujs_pointer obj, const char **out) {
+  mock_kx_obj *o = kx_of(obj);
+  if (!o) { set_err("invalid kx object"); return false; }
+  snprintf(g_str_buf, sizeof g_str_buf, "%s", o->name);
+  *out = g_str_buf;
+  return true;
+}
+
+bool ujs_kx_world_position(ujs_pointer obj, double *xyz) {
+  mock_kx_obj *o = kx_of(obj);
+  if (!o) { set_err("invalid kx object"); return false; }
+  memcpy(xyz, o->pos, 3 * sizeof(double));
+  return true;
+}
+
+bool ujs_kx_set_world_position(ujs_pointer obj, const double *xyz) {
+  mock_kx_obj *o = kx_of(obj);
+  if (!o) { set_err("invalid kx object"); return false; }
+  memcpy(o->pos, xyz, 3 * sizeof(double));
+  return true;
 }
 
 /* free memory this shim handed out (ujs_get_float_array_n) */

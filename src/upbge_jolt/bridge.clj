@@ -58,6 +58,13 @@
 (ffi/defcfn ujs-coll-remove "ujs_coll_remove" [:pointer :string :pointer] :bool)
 (ffi/defcfn ujs-operator-call "ujs_operator_call" [:string] :bool)
 
+(ffi/defcfn ujs-kx-object-count "ujs_kx_object_count" [:pointer] :bool)
+(ffi/defcfn ujs-kx-object-at "ujs_kx_object_at" [:int64 :pointer] :bool)
+(ffi/defcfn ujs-kx-object-find "ujs_kx_object_find" [:string :pointer] :bool)
+(ffi/defcfn ujs-kx-name "ujs_kx_name" [:pointer :pointer] :bool)
+(ffi/defcfn ujs-kx-world-position "ujs_kx_world_position" [:pointer :pointer] :bool)
+(ffi/defcfn ujs-kx-set-world-position "ujs_kx_set_world_position" [:pointer :pointer] :bool)
+
 ;; --- pointer marshalling --------------------------------------------------------
 
 (defn- host-error
@@ -501,3 +508,73 @@
   (core/marshal
    (fn []
      (or (ujs-operator-call opname) (host-error opname)))))
+
+;; --- KX engine (the running game) ---------------------------------------------
+
+(defn kx-objects
+  "All KX objects in the running game, as pointer maps. Empty when no game is
+  running."
+  []
+  (core/marshal
+   (fn []
+     (let [out (ffi/alloc 8)]
+       (try
+         (if (ujs-kx-object-count out)
+           (let [n (ffi/read out :int64)]
+             (vec (for [i (range n)]
+                    (let [o (ffi/alloc ptr-size)]
+                      (try
+                        (when (ujs-kx-object-at i o) (read-ptr! o))
+                        (finally (ffi/free o)))))))
+           (host-error nil))
+         (finally (ffi/free out)))))))
+
+(defn kx-object
+  "Find a KX object by name; nil when absent."
+  [name]
+  (core/marshal
+   (fn []
+     (let [out (ffi/alloc ptr-size)]
+       (try
+         (when (ujs-kx-object-find name out) (read-ptr! out))
+         (finally (ffi/free out)))))))
+
+(defn kx-name
+  "The name of a KX object."
+  [obj]
+  (core/marshal
+   (fn []
+     (with-ptr buf obj
+       (let [out (ffi/alloc 8)]
+         (try
+           (if (ujs-kx-name buf out)
+             (let [addr (ffi/read out :pointer)]
+               (when-not (ffi/null? addr) (ffi/ptr->string addr)))
+             (host-error "name"))
+           (finally (ffi/free out))))))))
+
+(defn kx-position
+  "World position of a KX object, as [x y z]."
+  [obj]
+  (core/marshal
+   (fn []
+     (with-ptr buf obj
+       (let [out (ffi/alloc 24)]
+         (try
+           (if (ujs-kx-world-position buf out)
+             (vec (for [i (range 3)] (ffi/read out :double (* 8 i))))
+             (host-error "position"))
+           (finally (ffi/free out))))))))
+
+(defn kx-move!
+  "Set the world position of a KX object."
+  [obj xyz]
+  (core/marshal
+   (fn []
+     (let [dbuf (ffi/alloc 24)]
+       (try
+         (doseq [[i v] (map-indexed vector xyz)]
+           (ffi/write dbuf :double (double v) (* 8 i)))
+         (with-ptr buf obj
+           (or (ujs-kx-set-world-position buf dbuf) (host-error "position")))
+         (finally (ffi/free dbuf)))))))

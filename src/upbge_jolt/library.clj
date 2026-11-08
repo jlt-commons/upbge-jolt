@@ -13,6 +13,7 @@
   (:require [upbge-jolt.core :as core]
             [upbge-jolt.bridge]     ; bake the bridge into the runtime
             [upbge-jolt.bpy]        ; and the ergonomic REPL layer
+            [upbge-jolt.bge]        ; and the game-engine (KX) layer
             [jolt.nrepl]            ; static so --library bakes it in
             [jolt.ffi :as ffi]))
 

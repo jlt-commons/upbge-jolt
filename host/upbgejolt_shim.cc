@@ -44,6 +44,12 @@
 #include "WM_api.hh"
 #include "bpy_capi_utils.hh"
 
+#include "EXP_ListValue.h"
+#include "KX_GameObject.h"
+#include "KX_Globals.h"
+#include "KX_Scene.h"
+#include "MT_Vector3.h"
+
 #include "BLI_math_vector_types.hh"
 #include "BLI_span.hh"
 
@@ -600,6 +606,100 @@ extern "C" bool ujs_operator_call(const char *opname)
   wmOperatorStatus status = WM_operator_name_call(
       C, opname, wm::OpCallContext::ExecDefault, nullptr, nullptr);
   return status & OPERATOR_FINISHED;
+}
+
+/* ---- KX engine (the running game) -------------------------------------------- */
+
+static KX_GameObject *kx_obj(ujs_pointer obj)
+{
+  return static_cast<KX_GameObject *>(obj.data);
+}
+
+extern "C" bool ujs_kx_object_count(int64_t *out)
+{
+  KX_Scene *scene = KX_GetActiveScene();
+  if (scene == nullptr) {
+    set_err("no game running");
+    return false;
+  }
+  *out = scene->GetObjectList()->GetCount();
+  return true;
+}
+
+extern "C" bool ujs_kx_object_at(int64_t index, ujs_pointer *out)
+{
+  KX_Scene *scene = KX_GetActiveScene();
+  if (scene == nullptr) {
+    set_err("no game running");
+    return false;
+  }
+  EXP_ListValue<KX_GameObject> *list = scene->GetObjectList();
+  if (index < 0 || index >= list->GetCount()) {
+    set_err("index out of range");
+    return false;
+  }
+  out->owner = 0;
+  out->type = 0;
+  out->data = list->GetValue(index);
+  return true;
+}
+
+extern "C" bool ujs_kx_object_find(const char *name, ujs_pointer *out)
+{
+  KX_Scene *scene = KX_GetActiveScene();
+  if (scene == nullptr) {
+    set_err("no game running");
+    return false;
+  }
+  EXP_ListValue<KX_GameObject> *list = scene->GetObjectList();
+  for (int i = 0; i < list->GetCount(); i++) {
+    KX_GameObject *obj = list->GetValue(i);
+    if (obj->GetName() == name) {
+      out->owner = 0;
+      out->type = 0;
+      out->data = obj;
+      return true;
+    }
+  }
+  set_err("no such object");
+  return false;
+}
+
+extern "C" bool ujs_kx_name(ujs_pointer obj, const char **out)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) {
+    set_err("invalid kx object");
+    return false;
+  }
+  snprintf(g_str_buf, sizeof g_str_buf, "%s", o->GetName().c_str());
+  *out = g_str_buf;
+  return true;
+}
+
+extern "C" bool ujs_kx_world_position(ujs_pointer obj, double *xyz)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) {
+    set_err("invalid kx object");
+    return false;
+  }
+  const MT_Vector3 &pos = o->NodeGetWorldPosition();
+  xyz[0] = pos.x();
+  xyz[1] = pos.y();
+  xyz[2] = pos.z();
+  return true;
+}
+
+extern "C" bool ujs_kx_set_world_position(ujs_pointer obj, const double *xyz)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) {
+    set_err("invalid kx object");
+    return false;
+  }
+  o->NodeSetLocalPosition(MT_Vector3(xyz[0], xyz[1], xyz[2]));
+  return true;
 }
 
 /* ---- root -------------------------------------------------------------------------- */

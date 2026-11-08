@@ -149,6 +149,33 @@ bool ujs_coll_remove(ujs_pointer coll, const char *name, ujs_pointer member);
 
 bool ujs_operator_call(const char *opname);
 
+/* ---- KX engine (the running game) -------------------------------------------
+ *
+ * Access to the game engine's runtime object model (KX_GameObject). Distinct
+ * from the RNA bridge, which sees the editor-side scene; KX objects exist only
+ * while a game is running and carry runtime state (world transforms, physics,
+ * sensors). A KX object crosses as a ujs_pointer whose .data is the
+ * KX_GameObject*. All functions answer false (with ujs_last_error) when no
+ * game is running. */
+
+/* Number of KX objects in the active scene. */
+bool ujs_kx_object_count(int64_t *out);
+
+/* The KX object at `index`. */
+bool ujs_kx_object_at(int64_t index, ujs_pointer *out);
+
+/* The KX object named `name`, or false when absent. */
+bool ujs_kx_object_find(const char *name, ujs_pointer *out);
+
+/* The object's name (host memory, valid until the next ujs_* call). */
+bool ujs_kx_name(ujs_pointer obj, const char **out);
+
+/* World position, as 3 doubles [x y z]. */
+bool ujs_kx_world_position(ujs_pointer obj, double *xyz);
+
+/* Set the world position from 3 doubles [x y z]. */
+bool ujs_kx_set_world_position(ujs_pointer obj, const double *xyz);
+
 /* ---- test-only hooks (mock shim; never called against a real host) ---- */
 
 void ujs_test_reset(void);
