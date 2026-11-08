@@ -364,6 +364,9 @@ bool ujs_set_pointer(ujs_pointer owner, const char *name, ujs_pointer v) {
   mock_prop *p = prop_find(o, name);
   if (!p) { set_err("no such property"); return false; }
   if (p->type != UJS_PROP_POINTER) { set_err("not a pointer property"); return false; }
+  /* Blender ignores a data assignment on an Empty (rna_Object_data_set) */
+  mock_prop *ty = prop_find(o, "type");
+  if (strcmp(name, "data") == 0 && ty && strcmp(ty->v.s, "EMPTY") == 0) return true;
   p->v.obj_index = v.data ? (int)(intptr_t)v.owner : -1;
   return true;
 }
@@ -432,12 +435,23 @@ bool ujs_id_new(const char *type_name, const char *name, ujs_pointer *out) {
     mock_prop *loc = add_prop(o, "location", UJS_PROP_FLOAT, 3, NULL);
     loc->v.fa[0] = 0; loc->v.fa[1] = 0; loc->v.fa[2] = 0;
     add_prop(o, "data", UJS_PROP_POINTER, 0, "Mesh")->v.obj_index = -1;
+    snprintf(add_prop(o, "type", UJS_PROP_STRING, 0, NULL)->v.s, 64, "EMPTY");
   } else {
     add_prop(o, "vertices", UJS_PROP_FLOAT, -1, NULL);
   }
   out->owner = idx;
   out->type = 0;
   out->data = &g_objects[idx];
+  return true;
+}
+
+bool ujs_object_new(const char *name, ujs_pointer data, ujs_pointer *out) {
+  if (!ujs_id_new("Object", name, out)) return false;
+  mock_obj *o = obj_of(*out);
+  if (data.data) {
+    prop_find(o, "data")->v.obj_index = (int)(intptr_t)data.owner;
+    snprintf(prop_find(o, "type")->v.s, 64, "MESH");
+  }
   return true;
 }
 
@@ -517,8 +531,7 @@ bool ujs_operator_call(const char *opname) {
     ujs_pointer mesh, obj, scene;
     if (!ujs_id_new("Mesh", "Cube", &mesh)) return false;
     if (!ujs_mesh_from_pydata(mesh, verts, 8, face_offsets, 6, face_indices, 24)) return false;
-    if (!ujs_id_new("Object", "Cube", &obj)) return false;
-    ujs_set_pointer(obj, "data", mesh);
+    if (!ujs_object_new("Cube", mesh, &obj)) return false;
     if (!ujs_root(&scene)) return false;
     return ujs_coll_add(scene, "objects", obj);
   }

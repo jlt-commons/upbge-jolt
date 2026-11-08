@@ -73,9 +73,7 @@
   "Create an object named `name` carrying `data` (a mesh pointer, or nil);
   returns the object."
   [name data]
-  (let [obj (b/id-new "Object" name)]
-    (when data (b/set! obj "data" data))
-    obj))
+  (b/object-new name data))
 
 (defn link!
   "Link `obj` into the scene's objects collection; returns it."

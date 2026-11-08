@@ -120,9 +120,27 @@
       (is (= "Thing" (b/get obj "name")))
       (is (= [0.0 0.0 0.0] (b/get obj "location")))
       (is (nil? (b/get obj "data")))))
+  (testing "an Object from id-new is an Empty: like Blender, it ignores a data assignment"
+    (let [obj (b/id-new "Object" "Hollow")
+          mesh (b/id-new "Mesh" "HollowMesh")]
+      (b/set! obj "data" mesh)
+      (is (= "EMPTY" (b/get obj "type")))
+      (is (nil? (b/get obj "data")))))
   (testing "id-new rejects an unknown type"
     (is (thrown-with-msg? Exception #"unknown id type"
           (b/id-new "Nonsense" "x")))))
+
+(deftest object-new
+  (testing "object-new types the object from its data, like bpy.data.objects.new"
+    (let [mesh (b/id-new "Mesh" "Body")
+          obj (b/object-new "Body" mesh)]
+      (is (= "Body" (b/get obj "name")))
+      (is (= "MESH" (b/get obj "type")))
+      (is (= "Body" (b/get (b/get obj "data") "name")))))
+  (testing "nil data makes an Empty"
+    (let [obj (b/object-new "Marker" nil)]
+      (is (= "EMPTY" (b/get obj "type")))
+      (is (nil? (b/get obj "data"))))))
 
 (deftest mesh-from-pydata
   (testing "builds geometry from verts and faces"

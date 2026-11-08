@@ -52,6 +52,7 @@
 (ffi/defcfn ujs-coll-iter-free "ujs_coll_iter_free" [:int64] :void)
 
 (ffi/defcfn ujs-id-new "ujs_id_new" [:string :string :pointer] :bool)
+(ffi/defcfn ujs-object-new "ujs_object_new" [:string :pointer :pointer] :bool)
 (ffi/defcfn ujs-mesh-from-pydata "ujs_mesh_from_pydata"
   [:pointer :pointer :int32 :pointer :int32 :pointer :int32] :bool)
 (ffi/defcfn ujs-coll-add "ujs_coll_add" [:pointer :string :pointer] :bool)
@@ -431,6 +432,22 @@
            (read-ptr! out)
            (host-error name))
          (finally (ffi/free out)))))))
+
+(defn object-new
+  "Create an Object named `name` carrying `data` (a mesh or other obdata
+  pointer; nil makes an Empty), typed from its data like
+  bpy.data.objects.new. Use this rather than (id-new \"Object\" ...), which
+  makes an Empty that ignores a later data assignment."
+  [name data]
+  (core/marshal
+   (fn []
+     (with-ptr dbuf data
+       (let [out (ffi/alloc ptr-size)]
+         (try
+           (if (ujs-object-new name dbuf out)
+             (read-ptr! out)
+             (host-error name))
+           (finally (ffi/free out))))))))
 
 (defn- face-encoding
   "A seq of face index-seqs -> [offsets indices], as flat int32 vectors.

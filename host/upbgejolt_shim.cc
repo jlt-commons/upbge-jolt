@@ -39,7 +39,14 @@
 #include "BKE_global.hh"
 #include "BKE_idtype.hh"
 #include "BKE_lib_id.hh"
+#include "BKE_main.hh"
+#include "BKE_material.hh"
+#include "BKE_object.hh"
 #include "BKE_mesh.h"
+#include "BKE_mesh.hh"
+
+#include "DEG_depsgraph.hh"
+#include "DEG_depsgraph_build.hh"
 
 #include "WM_api.hh"
 #include "bpy_capi_utils.hh"
@@ -130,6 +137,21 @@ static PropertyRNA *find_prop_typed(ujs_pointer owner, const char *name, Propert
     return nullptr;
   }
   return prop;
+}
+
+/* Run the property's RNA update after a write, as bpy does: tags the
+ * depsgraph and sends notifiers, so the viewport, the properties editor and
+ * the evaluated scene see the change. Without a context (headless startup)
+ * fall back to the Main-only update. */
+static void prop_updated(PointerRNA &ptr, PropertyRNA *prop)
+{
+  bContext *C = BPY_context_get();
+  if (C != nullptr) {
+    RNA_property_update(C, &ptr, prop);
+  }
+  else {
+    RNA_property_update_main(G_MAIN, nullptr, &ptr, prop);
+  }
 }
 
 static int ujs_type_of(PropertyRNA *prop)
@@ -364,10 +386,8 @@ extern "C" bool ujs_get_float_array_n(ujs_pointer owner, const char *name, doubl
 
 /* ---- typed set ----------------------------------------------------------------
  *
- * The RNA_property_*_set calls write the value; the depsgraph update that
- * Blender's Python layer triggers (via rna_property_update) is not performed
- * here yet — a later step should tag the ID with DEG_id_tag_update so the
- * game engine sees property changes on the next frame. */
+ * Every write runs the property's RNA update (prop_updated), the same path
+ * bpy takes, so dependents re-evaluate and editors redraw. */
 
 extern "C" bool ujs_set_bool(ujs_pointer owner, const char *name, bool v)
 {
@@ -375,6 +395,7 @@ extern "C" bool ujs_set_bool(ujs_pointer owner, const char *name, bool v)
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
   RNA_property_boolean_set(&ptr, prop, v);
+  prop_updated(ptr, prop);
   return true;
 }
 
@@ -384,6 +405,7 @@ extern "C" bool ujs_set_int(ujs_pointer owner, const char *name, int64_t v)
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
   RNA_property_int_set(&ptr, prop, (int)v);
+  prop_updated(ptr, prop);
   return true;
 }
 
@@ -397,6 +419,7 @@ extern "C" bool ujs_set_float(ujs_pointer owner, const char *name, double v)
     return false;
   }
   RNA_property_float_set(&ptr, prop, (float)v);
+  prop_updated(ptr, prop);
   return true;
 }
 
@@ -406,6 +429,7 @@ extern "C" bool ujs_set_string(ujs_pointer owner, const char *name, const char *
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
   RNA_property_string_set(&ptr, prop, v);
+  prop_updated(ptr, prop);
   return true;
 }
 
@@ -415,6 +439,7 @@ extern "C" bool ujs_set_enum(ujs_pointer owner, const char *name, int64_t v)
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
   RNA_property_enum_set(&ptr, prop, (int)v);
+  prop_updated(ptr, prop);
   return true;
 }
 
@@ -425,6 +450,7 @@ extern "C" bool ujs_set_pointer(ujs_pointer owner, const char *name, ujs_pointer
   PointerRNA ptr = as_rna(owner);
   PointerRNA tgt = as_rna(v);
   RNA_property_pointer_set(&ptr, prop, tgt, nullptr);
+  prop_updated(ptr, prop);
   return true;
 }
 
@@ -446,6 +472,7 @@ extern "C" bool ujs_set_float_array(ujs_pointer owner, const char *name, const d
   for (int i = 0; i < n; i++) tmp[i] = (float)v[i];
   RNA_property_float_set_array(&ptr, prop, tmp);
   free(tmp);
+  prop_updated(ptr, prop);
   return true;
 }
 
@@ -508,7 +535,37 @@ extern "C" bool ujs_id_new(const char *type_name, const char *name, ujs_pointer 
     set_err("failed to create id: %s", name);
     return false;
   }
+  DEG_relations_tag_update(G_MAIN);
+  WM_main_add_notifier(NC_ID | NA_ADDED, nullptr);
   *out = as_ujs(RNA_id_pointer_create(id));
+  return true;
+}
+
+/* bpy.data.objects.new: the object's type comes from its data (nullptr
+ * data = Empty). An Empty ignores a later RNA data assignment, which is why
+ * ujs_id_new("Object", ...) cannot build a mesh object. */
+extern "C" bool ujs_object_new(const char *name, ujs_pointer data, ujs_pointer *out)
+{
+  ID *id = static_cast<ID *>(data.data);
+  int type = OB_EMPTY;
+  if (id != nullptr) {
+    if (id->tag & ID_TAG_NO_MAIN) {
+      set_err("cannot create an object from evaluated data");
+      return false;
+    }
+    type = BKE_object_obdata_to_type(id);
+    if (type == -1) {
+      set_err("ID type is not valid object data: %s", id->name);
+      return false;
+    }
+    id_us_plus(id);
+  }
+  Object *ob = BKE_object_add_only_object(G_MAIN, ObjectType(type), name);
+  ob->data = id;
+  BKE_object_materials_sync_length(G_MAIN, ob, id);
+  DEG_relations_tag_update(G_MAIN);
+  WM_main_add_notifier(NC_ID | NA_ADDED, nullptr);
+  *out = as_ujs(RNA_id_pointer_create(&ob->id));
   return true;
 }
 
@@ -548,7 +605,10 @@ extern "C" bool ujs_mesh_from_pydata(ujs_pointer mesh,
   for (int i = 0; i < nindices; i++) {
     corner_verts[i] = face_indices[i];
   }
+  bke::mesh_calc_edges(*me, false, false);
   BKE_mesh_nomain_to_mesh(me, dst, nullptr);
+  DEG_id_tag_update(&dst->id, ID_RECALC_GEOMETRY);
+  WM_main_add_notifier(NC_GEOM | ND_DATA, &dst->id);
   return true;
 }
 
@@ -575,6 +635,9 @@ extern "C" bool ujs_coll_add(ujs_pointer coll, const char *name, ujs_pointer mem
     return false;
   }
   BKE_collection_object_add(G_MAIN, col, static_cast<Object *>(mptr.data));
+  DEG_id_tag_update(&col->id, ID_RECALC_SYNC_TO_EVAL);
+  DEG_relations_tag_update(G_MAIN);
+  WM_main_add_notifier(NC_SCENE | ND_LAYER_CONTENT, nullptr);
   return true;
 }
 
@@ -587,6 +650,9 @@ extern "C" bool ujs_coll_remove(ujs_pointer coll, const char *name, ujs_pointer 
     return false;
   }
   BKE_collection_object_remove(G_MAIN, col, static_cast<Object *>(mptr.data), false);
+  DEG_id_tag_update(&col->id, ID_RECALC_SYNC_TO_EVAL);
+  DEG_relations_tag_update(G_MAIN);
+  WM_main_add_notifier(NC_SCENE | ND_LAYER_CONTENT, nullptr);
   return true;
 }
 

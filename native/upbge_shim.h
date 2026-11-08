@@ -127,6 +127,12 @@ void ujs_coll_iter_free(ujs_iter_t it);
  * named `name`, and fill *out with its pointer. */
 bool ujs_id_new(const char *type_name, const char *name, ujs_pointer *out);
 
+/* Create an Object named `name` carrying `data` (a Mesh, Curve, Light, ...;
+ * a null pointer makes an Empty), its type derived from the data, like
+ * bpy.data.objects.new. ujs_id_new("Object", ...) makes an Empty, and an
+ * Empty ignores a later data assignment, so data-carrying objects need this. */
+bool ujs_object_new(const char *name, ujs_pointer data, ujs_pointer *out);
+
 /* Replace `mesh`'s geometry from vertex positions and polygon indices, like
  * bpy's Mesh.from_pydata. `verts` holds nverts xyz triples. `face_offsets`
  * (nfaces+1 int32) are prefix offsets into `face_indices`; polygon i runs
