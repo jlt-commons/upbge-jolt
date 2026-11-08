@@ -12,6 +12,8 @@ DEFAULT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 def write(port):
     path = os.environ.get("UPBGE_JOLT_PORT_FILE", DEFAULT)
+    if port <= 0:
+        raise ValueError(f"not a server port: {port}")
     with open(path, "w") as f:
         f.write(str(port))
 

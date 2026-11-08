@@ -9,6 +9,8 @@
  *                          nREPL server; returns the bound port, or -1.
  *   int uj_host_tick()  -- drain the jolt op queue (call from the main thread
  *                          every frame; the bridge marshals here).
+ *   int uj_host_game_tick() -- the same, from the game loop; marks a game as
+ *                          running so the KX calls know the scene is live.
  *
  * Both run on Blender's main thread (the Python interpreter and
  * bpy.app.timers callbacks run there), which is exactly the thread the
@@ -44,6 +46,7 @@ typedef void (*uj_set_root_fn)(ujs_pointer);
 static void *g_lib = nullptr;
 static uj_tick_fn g_tick = nullptr;
 static int g_started = 0;
+static int g_port = -1;
 
 static void *lookup(const char *name)
 {
@@ -53,7 +56,7 @@ static void *lookup(const char *name)
 
 extern "C" int uj_host_init()
 {
-  if (g_started) return 0;
+  if (g_started) return g_port; /* idempotent: report the running server */
 
   const char *path = getenv("UPBGE_JOLT_LIB");
   if (path == nullptr) path = "libjolt_upbge.dylib";
@@ -106,11 +109,26 @@ extern "C" int uj_host_init()
   }
 
   g_started = 1;
+  g_port = port;
   return port;
 }
 
+extern "C" void uj_shim_set_in_game(bool in_game);
+
+/* Editor / headless pump: no game is running while this is called. */
 extern "C" int uj_host_tick()
 {
+  uj_shim_set_in_game(false);
+  if (g_tick != nullptr) {
+    return g_tick();
+  }
+  return 0;
+}
+
+/* Game loop pump, called from KX_KetsjiEngine::NextFrame. */
+extern "C" int uj_host_game_tick()
+{
+  uj_shim_set_in_game(true);
   if (g_tick != nullptr) {
     return g_tick();
   }

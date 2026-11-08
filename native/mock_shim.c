@@ -777,3 +777,36 @@ bool ujs_set_enum_id(ujs_pointer owner, const char *name, const char *ids) {
   set_err(msg);
   return false;
 }
+
+/* --- game session (round 2) ------------------------------------------------ */
+
+static bool g_kx_running = false;
+
+bool ujs_kx_running(void) { return g_kx_running; }
+
+/* test hook: pretend a game started or ended */
+void ujs_test_set_kx_running(bool running) { g_kx_running = running; }
+
+bool ujs_kx_end_game(void) {
+  if (!g_kx_running) { set_err("no game running"); return false; }
+  g_kx_running = false;
+  return true;
+}
+
+/* --- KX runtime (round 3): the mock models positions only ------------------- */
+
+bool ujs_kx_get_vec(ujs_pointer obj, const char *what, double *out) {
+  mock_kx_obj *o = kx_of(obj);
+  if (!o) { set_err("invalid kx object"); return false; }
+  if (strcmp(what, "position") != 0) { set_err("mock: only position"); return false; }
+  out[0] = o->pos[0]; out[1] = o->pos[1]; out[2] = o->pos[2];
+  return true;
+}
+
+bool ujs_kx_set_vec(ujs_pointer obj, const char *what, const double *v) {
+  mock_kx_obj *o = kx_of(obj);
+  if (!o) { set_err("invalid kx object"); return false; }
+  if (strcmp(what, "position") != 0) { set_err("mock: only position"); return false; }
+  o->pos[0] = v[0]; o->pos[1] = v[1]; o->pos[2] = v[2];
+  return true;
+}

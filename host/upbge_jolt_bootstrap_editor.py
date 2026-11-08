@@ -34,6 +34,7 @@ def _pump():
 
 
 def main():
+    """Start the runtime and the editor pump. Returns the port, or None."""
     global _tick
     exe = ctypes.CDLL(None)
     init = exe.uj_host_init
@@ -42,15 +43,16 @@ def main():
     _tick.restype = ctypes.c_int
 
     port = init()
-    if port < 0:
+    if port <= 0:
         print("upbge-jolt: init failed", file=sys.stderr)
-        return
+        return None
     print(f"upbge-jolt: nREPL listening on port {port}", file=sys.stderr, flush=True)
     path = upbge_jolt_portfile.write(port)
     print(f"upbge-jolt: wrote {path}", file=sys.stderr, flush=True)
 
     bpy.context.preferences.view.show_splash = False
     bpy.app.timers.register(_pump, first_interval=STEP, persistent=True)
+    return port
 
 
 if __name__ == "__main__":

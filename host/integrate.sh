@@ -156,13 +156,30 @@ grep -q 'const float kernel\[9\]' "$UPBGE/source/blender/draw/engines/eevee/shad
   "$UPBGE/source/blender/draw/engines/eevee/shaders/eevee_shadow_tracing.bsl.hh"
 
 # --- game-side tick: drain the jolt op queue from the game loop -------------
-grep -q "uj_host_tick()" "$UPBGE/source/gameengine/Ketsji/KX_KetsjiEngine.cpp" || \
-  sed -i '' 's|^using namespace blender;$|using namespace blender;\n\nextern "C" int uj_host_tick();|' \
-  "$UPBGE/source/gameengine/Ketsji/KX_KetsjiEngine.cpp"
+# uj_host_game_tick (not uj_host_tick) so the shim knows a game is running.
+KXE="$UPBGE/source/gameengine/Ketsji/KX_KetsjiEngine.cpp"
+grep -q "uj_host_game_tick" "$KXE" || {
+  if grep -q "uj_host_tick()" "$KXE"; then
+    sed -i '' 's/uj_host_tick()/uj_host_game_tick()/g' "$KXE"
+  else
+    sed -i '' 's|^using namespace blender;$|using namespace blender;\n\nextern "C" int uj_host_game_tick();|' "$KXE"
+    sed -i '' 's|^  return m_doRender;$|  uj_host_game_tick();\n\n  return m_doRender;|' "$KXE"
+  fi
+}
 
-grep -q "uj_host_tick()" "$UPBGE/source/gameengine/Ketsji/KX_KetsjiEngine.cpp" || \
-  sed -i '' 's|^  return m_doRender;$|  uj_host_tick();\n\n  return m_doRender;|' \
-  "$UPBGE/source/gameengine/Ketsji/KX_KetsjiEngine.cpp"
+# --- mark the game stopped before its scenes are freed -----------------------
+grep -q "uj_shim_set_in_game" "$KXE" || python3 - "$KXE" <<'PY'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old = "void KX_KetsjiEngine::StopEngine()\n{\n"
+if old not in src:
+    sys.exit("integrate.sh: StopEngine not found in " + path)
+src = src.replace(old, old + "  uj_shim_set_in_game(false); /* upbge-jolt: KX scenes die below */\n", 1)
+src = src.replace('extern "C" int uj_host_game_tick();',
+                  'extern "C" int uj_host_game_tick();\nextern "C" void uj_shim_set_in_game(bool in_game);', 1)
+open(path, "w").write(src)
+PY
 
 # --- configure + build ------------------------------------------------------
 NPROC="$(sysctl -n hw.ncpu 2>/dev/null || nproc)"

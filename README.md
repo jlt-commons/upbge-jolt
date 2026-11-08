@@ -134,17 +134,42 @@ A timer pumps `uj_tick` at 60 Hz and redraws the 3D viewport, so `bpy`
 edits from the REPL appear immediately. Press P in the viewport (or
 `(bpy/ops "view3d.game_start")`) to play the scene.
 
-Run the game engine (windowed — no `--background`):
+Play a scene in the game engine (windowed), one command:
 
 ```
-UPBGE_JOLT_LIB=$PWD/libjolt_upbge.dylib \
-  native/upbge/build_darwin/bin/Blender.app/Contents/MacOS/Blender \
-  --python host/upbge_jolt_bootstrap_game.py
+host/play.sh scene.blend
 ```
 
-This starts the nREPL server, starts the game in the viewport, and the game
-loop pumps `uj_tick` each frame (hooked into `KX_KetsjiEngine::NextFrame`),
-so `upbge-jolt.bge` reaches the running `KX_GameObject`s.
+The game loop pumps `uj_tick` each frame (`uj_host_game_tick`, hooked into
+`KX_KetsjiEngine::NextFrame`); when the game ends the editor pump takes over,
+so the REPL stays up and the game can be restarted with `(game/start!)`.
+
+## Game logic: upbge-jolt.game and upbge-jolt.bge
+
+A game's code lives in a Text datablock named `main.clj` inside the .blend,
+so saving the scene saves its logic. It is evaluated when each game starts.
+Develop it at the REPL against the running game, then store it:
+
+```clojure
+(require '[upbge-jolt.game :as game] '[upbge-jolt.bge :as bge] '[upbge-jolt.bpy :as bpy])
+
+(game/on-frame! :spin                      ; every frame while the game runs
+  (fn [dt] (bge/rotate-to! (bge/object "Cube") [0 0 (* 0.5 (:clock (bge/frame-info)))])))
+(game/start!)                              ; play in the viewport; (game/stop!) ends it
+
+(game/set-main-file! "game/main.clj")      ; store the code in the .blend
+(bpy/save! "scene.blend")
+```
+
+Frame handlers run on the host thread with the frame's delta time, are
+dropped when the game ends, and a handler that throws is removed and kept in
+`(game/errors)`. `bge` covers transforms, physics (velocity, force, torque,
+impulse at a point, mass, damping), raycasts, parenting, spawning and removing
+objects, camera switching, visibility, keyboard/mouse input, mouse warp and
+visibility, screenshots and frame timing. `bge/blender-object` crosses to the
+Blender Object behind a game object, so lights, materials and node values can
+be changed through the RNA bridge while the game runs. KX handles are
+validated on every call: a stale one raises instead of touching freed memory.
 
 ## Threading contract
 
@@ -185,6 +210,11 @@ it on the frame. Reentrant calls (from inside a tick-drained op) run inline.
       operators with properties and an editor-area context, generic RNA
       function calls, collection lookup, bulk foreach get/set, int/bool
       arrays, enums by identifier, save/open — verified against the live editor
+- [x] Game sessions: main.clj stored in the .blend and loaded on game start,
+      per-frame handlers with error isolation, start/stop from the REPL,
+      one-command play — verified across repeated start/stop cycles
+- [x] KX runtime: transforms, physics, raycasts, hierarchy, spawning,
+      cameras, input, mouse, screenshots — verified in the running game
 - unchecked box = in progress or planned
 
 ## License

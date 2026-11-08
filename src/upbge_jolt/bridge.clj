@@ -836,3 +836,236 @@
   or nil."
   [p name v]
   (core/marshal (fn [] (set*! p name v))))
+
+;; --- KX runtime: transforms, physics, raycasts, hierarchy, spawning,
+;; cameras, input, canvas ------------------------------------------------------
+
+(ffi/defcfn ujs-kx-running "ujs_kx_running" [] :bool)
+(ffi/defcfn ujs-kx-end-game "ujs_kx_end_game" [] :bool)
+(ffi/defcfn ujs-kx-get-vec "ujs_kx_get_vec" [:pointer :string :pointer] :bool)
+(ffi/defcfn ujs-kx-set-vec "ujs_kx_set_vec" [:pointer :string :pointer] :bool)
+(ffi/defcfn ujs-kx-get-orientation "ujs_kx_get_orientation" [:pointer :pointer] :bool)
+(ffi/defcfn ujs-kx-set-orientation "ujs_kx_set_orientation" [:pointer :pointer] :bool)
+(ffi/defcfn ujs-kx-apply "ujs_kx_apply" [:pointer :string :pointer :pointer :bool] :bool)
+(ffi/defcfn ujs-kx-get-mass "ujs_kx_get_mass" [:pointer :pointer] :bool)
+(ffi/defcfn ujs-kx-set-mass "ujs_kx_set_mass" [:pointer :double] :bool)
+(ffi/defcfn ujs-kx-set-damping "ujs_kx_set_damping" [:pointer :double :double] :bool)
+(ffi/defcfn ujs-kx-suspend-dynamics "ujs_kx_suspend_dynamics" [:pointer :bool] :bool)
+(ffi/defcfn ujs-kx-raycast "ujs_kx_raycast" [:pointer :pointer :pointer :pointer :pointer :pointer] :bool)
+(ffi/defcfn ujs-kx-get-parent "ujs_kx_get_parent" [:pointer :pointer] :bool)
+(ffi/defcfn ujs-kx-set-parent "ujs_kx_set_parent" [:pointer :pointer] :bool)
+(ffi/defcfn ujs-kx-spawn "ujs_kx_spawn" [:string :pointer :double :pointer] :bool)
+(ffi/defcfn ujs-kx-remove "ujs_kx_remove" [:pointer] :bool)
+(ffi/defcfn ujs-kx-set-camera "ujs_kx_set_camera" [:pointer] :bool)
+(ffi/defcfn ujs-kx-set-visible "ujs_kx_set_visible" [:pointer :bool :bool] :bool)
+(ffi/defcfn ujs-kx-blender-object "ujs_kx_blender_object" [:pointer :pointer] :bool)
+(ffi/defcfn ujs-kx-input "ujs_kx_input" [:string :pointer] :bool)
+(ffi/defcfn ujs-kx-mouse "ujs_kx_mouse" [:pointer] :bool)
+(ffi/defcfn ujs-kx-set-mouse "ujs_kx_set_mouse" [:double :double] :bool)
+(ffi/defcfn ujs-kx-show-mouse "ujs_kx_show_mouse" [:bool] :bool)
+(ffi/defcfn ujs-kx-screenshot "ujs_kx_screenshot" [:string] :bool)
+(ffi/defcfn ujs-kx-frame-info "ujs_kx_frame_info" [:pointer] :bool)
+(ffi/defcfn ujs-kx-canvas-size "ujs_kx_canvas_size" [:pointer :pointer] :bool)
+
+(defn- doubles-in
+  "Allocate n doubles holding xs (nil -> null pointer)."
+  [xs n]
+  (if (nil? xs)
+    ffi/null
+    (let [b (ffi/alloc (* 8 n))]
+      (dotimes [i n] (ffi/write b :double (double (nth xs i)) (* 8 i)))
+      b)))
+
+(defn- free-doubles [b] (when-not (ffi/null? b) (ffi/free b)))
+
+(defn- read-doubles [b n] (vec (for [i (range n)] (ffi/read b :double (* 8 i)))))
+
+(defmacro ^:private on-host
+  "Run body on the host thread (marshal)."
+  [& body]
+  `(core/marshal (fn [] ~@body)))
+
+(defn kx-running?
+  "Whether a game is running."
+  []
+  (on-host (ujs-kx-running)))
+
+(defn kx-end-game!
+  "End the running game."
+  []
+  (on-host (or (ujs-kx-end-game) (host-error "end game"))))
+
+(defn kx-vec
+  "Read a KX vector: :position :scale :linear-velocity :angular-velocity
+  :local-linear-velocity :local-angular-velocity."
+  [obj what]
+  (on-host
+   (let [out (ffi/alloc 24)]
+     (try
+       (with-ptr buf obj
+         (if (ujs-kx-get-vec buf (str/replace (kw-name what) "-" "_") out)
+           (read-doubles out 3)
+           (host-error (kw-name what))))
+       (finally (ffi/free out))))))
+
+(defn kx-set-vec!
+  "Write a KX vector (see kx-vec)."
+  [obj what xyz]
+  (on-host
+   (let [in (doubles-in xyz 3)]
+     (try
+       (with-ptr buf obj
+         (or (ujs-kx-set-vec buf (str/replace (kw-name what) "-" "_") in)
+             (host-error (kw-name what))))
+       (finally (free-doubles in))))))
+
+(defn kx-orientation
+  "World orientation as a row-major 3x3 vector of 9 doubles."
+  [obj]
+  (on-host
+   (let [out (ffi/alloc 72)]
+     (try
+       (with-ptr buf obj
+         (if (ujs-kx-get-orientation buf out) (read-doubles out 9) (host-error "orientation")))
+       (finally (ffi/free out))))))
+
+(defn kx-set-orientation!
+  "Set world orientation from a row-major 3x3 (9 doubles)."
+  [obj m9]
+  (on-host
+   (let [in (doubles-in m9 9)]
+     (try
+       (with-ptr buf obj (or (ujs-kx-set-orientation buf in) (host-error "orientation")))
+       (finally (free-doubles in))))))
+
+(defn kx-apply!
+  "Apply :force, :torque or :impulse (at world point `at`) to `obj`."
+  [obj what v & {:keys [at local?]}]
+  (on-host
+   (let [vb (doubles-in v 3) ab (doubles-in at 3)]
+     (try
+       (with-ptr buf obj
+         (or (ujs-kx-apply buf (kw-name what) vb ab (boolean local?)) (host-error (kw-name what))))
+       (finally (free-doubles vb) (free-doubles ab))))))
+
+(defn kx-mass [obj]
+  (on-host
+   (let [out (ffi/alloc 8)]
+     (try (with-ptr buf obj (if (ujs-kx-get-mass buf out) (ffi/read out :double) (host-error "mass")))
+          (finally (ffi/free out))))))
+
+(defn kx-set-mass! [obj m]
+  (on-host (with-ptr buf obj (or (ujs-kx-set-mass buf (double m)) (host-error "mass")))))
+
+(defn kx-set-damping! [obj linear angular]
+  (on-host (with-ptr buf obj (or (ujs-kx-set-damping buf (double linear) (double angular)) (host-error "damping")))))
+
+(defn kx-suspend-dynamics! [obj suspend?]
+  (on-host (with-ptr buf obj (or (ujs-kx-suspend-dynamics buf (boolean suspend?)) (host-error "dynamics")))))
+
+(defn kx-raycast
+  "First physics hit from `from` to `to`, skipping `ignore` (or nil):
+  {:object kx-obj :point [x y z] :normal [x y z]} or nil on a miss."
+  [from to ignore]
+  (on-host
+   (let [fb (doubles-in from 3) tb (doubles-in to 3)
+         hit (ffi/alloc ptr-size) pt (ffi/alloc 24) nm (ffi/alloc 24)]
+     (try
+       (with-ptr ib ignore
+         (if (ujs-kx-raycast fb tb ib hit pt nm)
+           (when-let [o (read-ptr! hit)]
+             {:object o :point (read-doubles pt 3) :normal (read-doubles nm 3)})
+           (host-error "raycast")))
+       (finally (free-doubles fb) (free-doubles tb) (ffi/free hit) (ffi/free pt) (ffi/free nm))))))
+
+(defn kx-parent [obj]
+  (on-host
+   (let [out (ffi/alloc ptr-size)]
+     (try (with-ptr buf obj (if (ujs-kx-get-parent buf out) (read-ptr! out) (host-error "parent")))
+          (finally (ffi/free out))))))
+
+(defn kx-set-parent!
+  "Parent `obj` to `parent` (nil removes the parent)."
+  [obj parent]
+  (on-host (with-ptr buf obj (with-ptr pb parent (or (ujs-kx-set-parent buf pb) (host-error "parent"))))))
+
+(defn kx-spawn!
+  "Spawn a copy of object `name` (typically one kept in an excluded/hidden
+  collection) at `at`'s transform (nil = the original's), living `lifespan`
+  seconds (0 = forever)."
+  ([name] (kx-spawn! name nil 0))
+  ([name at lifespan]
+   (on-host
+    (let [out (ffi/alloc ptr-size)]
+      (try (with-ptr ab at
+             (if (ujs-kx-spawn name ab (double lifespan) out) (read-ptr! out) (host-error name)))
+           (finally (ffi/free out)))))))
+
+(defn kx-remove! [obj]
+  (on-host (with-ptr buf obj (or (ujs-kx-remove buf) (host-error "remove")))))
+
+(defn kx-set-camera! [cam]
+  (on-host (with-ptr buf cam (or (ujs-kx-set-camera buf) (host-error "camera")))))
+
+(defn kx-set-visible! [obj visible? recursive?]
+  (on-host (with-ptr buf obj (or (ujs-kx-set-visible buf (boolean visible?) (boolean recursive?)) (host-error "visible")))))
+
+(defn kx-blender-object
+  "The Blender Object (RNA pointer) a KX object came from: change its lights,
+  materials and other data through get/set!/call while the game runs."
+  [obj]
+  (on-host
+   (let [out (ffi/alloc ptr-size)]
+     (try (with-ptr buf obj (if (ujs-kx-blender-object buf out) (read-ptr! out) (host-error "blender object")))
+          (finally (ffi/free out))))))
+
+(defn kx-input
+  "Input state for a bge event name (\"WKEY\", :LEFTSHIFTKEY, \"LEFTMOUSE\"):
+  #{:active :activated :released} subset."
+  [k]
+  (on-host
+   (let [out (ffi/alloc 4)]
+     (try
+       (if (ujs-kx-input (kw-name k) out)
+         (let [s (ffi/read out :int32)]
+           (cond-> #{}
+             (pos? (bit-and s 1)) (conj :active)
+             (pos? (bit-and s 2)) (conj :activated)
+             (pos? (bit-and s 4)) (conj :released)))
+         (host-error (kw-name k)))
+       (finally (ffi/free out))))))
+
+(defn kx-mouse
+  "Mouse position, normalized [x y] in 0..1."
+  []
+  (on-host
+   (let [out (ffi/alloc 16)]
+     (try (if (ujs-kx-mouse out) (read-doubles out 2) (host-error "mouse"))
+          (finally (ffi/free out))))))
+
+(defn kx-set-mouse! [x y]
+  (on-host (or (ujs-kx-set-mouse (double x) (double y)) (host-error "mouse"))))
+
+(defn kx-show-mouse! [visible?]
+  (on-host (or (ujs-kx-show-mouse (boolean visible?)) (host-error "mouse"))))
+
+(defn kx-screenshot!
+  "Save the game canvas to `path` (PNG)."
+  [path]
+  (on-host (or (ujs-kx-screenshot path) (host-error "screenshot"))))
+
+(defn kx-frame-info
+  "{:fps average :clock engine-seconds :frame-time last-timestep}."
+  []
+  (on-host
+   (let [out (ffi/alloc 24)]
+     (try (if (ujs-kx-frame-info out)
+            (let [[f c t] (read-doubles out 3)] {:fps f :clock c :frame-time t})
+            (host-error "frame info"))
+          (finally (ffi/free out))))))
+
+(defn kx-canvas-size []
+  (on-host
+   (let [w (ffi/alloc 4) h (ffi/alloc 4)]
+     (try (if (ujs-kx-canvas-size w h) [(ffi/read w :int32) (ffi/read h :int32)] (host-error "canvas"))
+          (finally (ffi/free w) (ffi/free h))))))

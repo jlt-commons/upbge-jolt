@@ -256,6 +256,54 @@ void ujs_test_reset(void);
  * memory. */
 void ujs_free(void *ptr);
 
+/* ---- KX runtime (round 3) -------------------------------------------------
+ *
+ * All take KX object pointers from ujs_kx_object_* and validate them against
+ * the running scene: a stale pointer (object removed, game ended) fails with
+ * an error instead of touching freed memory. Vectors are double[3],
+ * orientations row-major double[9]. */
+
+bool ujs_kx_running(void);
+/* end the running game, as bge.logic.endGame() */
+bool ujs_kx_end_game(void);
+/* what: "position" "scale" "linear_velocity" "angular_velocity"
+ * "local_linear_velocity" "local_angular_velocity" */
+bool ujs_kx_get_vec(ujs_pointer obj, const char *what, double *out);
+bool ujs_kx_set_vec(ujs_pointer obj, const char *what, const double *v);
+bool ujs_kx_get_orientation(ujs_pointer obj, double *m9);
+bool ujs_kx_set_orientation(ujs_pointer obj, const double *m9);
+/* what: "force" "torque" "impulse" (impulse applies at world point `at`) */
+bool ujs_kx_apply(ujs_pointer obj, const char *what, const double *v, const double *at, bool local);
+bool ujs_kx_get_mass(ujs_pointer obj, double *out);
+bool ujs_kx_set_mass(ujs_pointer obj, double mass);
+bool ujs_kx_set_damping(ujs_pointer obj, double linear, double angular);
+bool ujs_kx_suspend_dynamics(ujs_pointer obj, bool suspend);
+/* first hit from `from` to `to`, skipping `ignore` (may be null) */
+bool ujs_kx_raycast(const double *from, const double *to, ujs_pointer ignore,
+                    ujs_pointer *hit, double *point, double *normal);
+bool ujs_kx_get_parent(ujs_pointer obj, ujs_pointer *out);
+bool ujs_kx_set_parent(ujs_pointer obj, ujs_pointer parent); /* null parent = remove */
+/* spawn a copy of object `name` (an inactive/hidden object, or an active one)
+ * at `at`'s transform (null = the original's), living `lifespan` seconds (0 = forever) */
+bool ujs_kx_spawn(const char *name, ujs_pointer at, double lifespan, ujs_pointer *out);
+bool ujs_kx_remove(ujs_pointer obj);
+bool ujs_kx_set_camera(ujs_pointer cam);
+bool ujs_kx_set_visible(ujs_pointer obj, bool visible, bool recursive);
+/* the Blender Object an engine object was converted from, as an RNA pointer:
+ * lights, materials and other datablocks are then reachable through the RNA
+ * bridge while the game runs */
+bool ujs_kx_blender_object(ujs_pointer obj, ujs_pointer *out);
+/* input by bge event name ("WKEY", "LEFTSHIFTKEY", "LEFTMOUSE", ...):
+ * bit 1 = active, 2 = just activated, 4 = just released */
+bool ujs_kx_input(const char *name, int32_t *status);
+bool ujs_kx_mouse(double *xy);            /* normalized 0..1 */
+bool ujs_kx_set_mouse(double x, double y); /* normalized */
+bool ujs_kx_show_mouse(bool visible);
+bool ujs_kx_screenshot(const char *path);
+/* [average fps, engine clock seconds, last frame timestep] */
+bool ujs_kx_frame_info(double *out3);
+bool ujs_kx_canvas_size(int32_t *w, int32_t *h);
+
 #ifdef __cplusplus
 }
 #endif

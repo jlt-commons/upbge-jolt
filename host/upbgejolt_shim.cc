@@ -65,6 +65,14 @@
 #include "KX_GameObject.h"
 #include "KX_Globals.h"
 #include "KX_Scene.h"
+#include "KX_Camera.h"
+#include "KX_ClientObjectInfo.h"
+#include "KX_KetsjiEngine.h"
+#include "KX_RayCast.h"
+#include "PHY_IPhysicsController.h"
+#include "RAS_ICanvas.h"
+#include "SCA_IInputDevice.h"
+#include "SCA_InputEvent.h"
 #include "MT_Vector3.h"
 
 #include "BLI_math_vector_types.hh"
@@ -83,7 +91,8 @@ using namespace blender;
 /* ---- error surface -------------------------------------------------------- */
 
 static char g_last_error[512];
-static char g_str_buf[4096];  /* string out-param lifetime: next ujs_* call */
+static char g_str_buf[4096];  /* short string out-params; lifetime: next ujs_* call */
+static std::string g_long_str; /* unbounded string results, same lifetime */
 
 static void set_err(const char *fmt, ...)
 {
@@ -308,9 +317,8 @@ extern "C" bool ujs_get_string(ujs_pointer owner, const char *name, const char *
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_STRING);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
-  std::string s = RNA_property_string_get(&ptr, prop);
-  snprintf(g_str_buf, sizeof g_str_buf, "%s", s.c_str());
-  *out = g_str_buf;
+  g_long_str = RNA_property_string_get(&ptr, prop);
+  *out = g_long_str.c_str();
   return true;
 }
 
@@ -695,14 +703,53 @@ extern "C" bool ujs_operator_call(const char *opname)
 
 /* ---- KX engine (the running game) -------------------------------------------- */
 
+/* KX_GetActiveScene() is not cleared when a game ends, so it cannot say
+ * whether one is running. The host ticks through uj_host_game_tick from the
+ * game loop and through uj_host_tick otherwise (a WM timer cannot fire while
+ * the game loop owns the main thread), which tracks it exactly. */
+static bool g_in_game = false;
+
+extern "C" void uj_shim_set_in_game(bool in_game)
+{
+  g_in_game = in_game;
+}
+
+static KX_Scene *kx_scene()
+{
+  return g_in_game ? KX_GetActiveScene() : nullptr;
+}
+
+/* A KX object pointer, only if it is still in the running scene (active or
+ * inactive list); nullptr + error otherwise. */
 static KX_GameObject *kx_obj(ujs_pointer obj)
 {
-  return static_cast<KX_GameObject *>(obj.data);
+  KX_Scene *scene = kx_scene();
+  if (scene == nullptr) {
+    set_err("no game running");
+    return nullptr;
+  }
+  if (obj.data == nullptr) {
+    set_err("invalid kx object");
+    return nullptr;
+  }
+  for (EXP_ListValue<KX_GameObject> *list : {scene->GetObjectList(), scene->GetInactiveList()}) {
+    for (int i = 0; i < list->GetCount(); i++) {
+      if (list->GetValue(i) == obj.data) return list->GetValue(i);
+    }
+  }
+  set_err("stale kx object (removed, or from an earlier game run)");
+  return nullptr;
+}
+
+static ujs_pointer kx_ptr(KX_GameObject *o)
+{
+  ujs_pointer p = {0, 0, o};
+  return p;
 }
 
 extern "C" bool ujs_kx_object_count(int64_t *out)
 {
-  KX_Scene *scene = KX_GetActiveScene();
+  KX_Scene *scene = kx_scene();
   if (scene == nullptr) {
     set_err("no game running");
     return false;
@@ -713,7 +760,7 @@ extern "C" bool ujs_kx_object_count(int64_t *out)
 
 extern "C" bool ujs_kx_object_at(int64_t index, ujs_pointer *out)
 {
-  KX_Scene *scene = KX_GetActiveScene();
+  KX_Scene *scene = kx_scene();
   if (scene == nullptr) {
     set_err("no game running");
     return false;
@@ -731,7 +778,7 @@ extern "C" bool ujs_kx_object_at(int64_t index, ujs_pointer *out)
 
 extern "C" bool ujs_kx_object_find(const char *name, ujs_pointer *out)
 {
-  KX_Scene *scene = KX_GetActiveScene();
+  KX_Scene *scene = kx_scene();
   if (scene == nullptr) {
     set_err("no game running");
     return false;
@@ -784,6 +831,406 @@ extern "C" bool ujs_kx_set_world_position(ujs_pointer obj, const double *xyz)
     return false;
   }
   o->NodeSetLocalPosition(MT_Vector3(xyz[0], xyz[1], xyz[2]));
+  return true;
+}
+
+/* ---- KX runtime (round 3) ------------------------------------------------------ */
+
+extern "C" bool ujs_kx_running(void)
+{
+  return kx_scene() != nullptr;
+}
+
+extern "C" bool ujs_kx_end_game(void)
+{
+  KX_KetsjiEngine *engine = KX_GetActiveEngine();
+  if (engine == nullptr || kx_scene() == nullptr) {
+    set_err("no game running");
+    return false;
+  }
+  engine->RequestExit(KX_ExitRequest::QUIT_GAME);
+  return true;
+}
+
+extern "C" bool ujs_kx_get_vec(ujs_pointer obj, const char *what, double *out)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  MT_Vector3 v;
+  if (strcmp(what, "position") == 0) v = o->NodeGetWorldPosition();
+  else if (strcmp(what, "scale") == 0) v = o->NodeGetWorldScaling();
+  else if (strcmp(what, "linear_velocity") == 0) v = o->GetLinearVelocity(false);
+  else if (strcmp(what, "angular_velocity") == 0) v = o->GetAngularVelocity(false);
+  else if (strcmp(what, "local_linear_velocity") == 0) v = o->GetLinearVelocity(true);
+  else if (strcmp(what, "local_angular_velocity") == 0) v = o->GetAngularVelocity(true);
+  else {
+    set_err("unknown vector: %s", what);
+    return false;
+  }
+  out[0] = v.x(); out[1] = v.y(); out[2] = v.z();
+  return true;
+}
+
+extern "C" bool ujs_kx_set_vec(ujs_pointer obj, const char *what, const double *in)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  MT_Vector3 v(in[0], in[1], in[2]);
+  if (strcmp(what, "position") == 0) o->NodeSetWorldPosition(v);
+  else if (strcmp(what, "scale") == 0) o->NodeSetWorldScale(v);
+  else if (strcmp(what, "linear_velocity") == 0) o->setLinearVelocity(v, false);
+  else if (strcmp(what, "angular_velocity") == 0) o->setAngularVelocity(v, false);
+  else if (strcmp(what, "local_linear_velocity") == 0) o->setLinearVelocity(v, true);
+  else if (strcmp(what, "local_angular_velocity") == 0) o->setAngularVelocity(v, true);
+  else {
+    set_err("unknown vector: %s", what);
+    return false;
+  }
+  o->NodeUpdateGS(0.0);
+  return true;
+}
+
+extern "C" bool ujs_kx_get_orientation(ujs_pointer obj, double *m9)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  const MT_Matrix3x3 &m = o->NodeGetWorldOrientation();
+  for (int r = 0; r < 3; r++)
+    for (int c = 0; c < 3; c++) m9[r * 3 + c] = m[r][c];
+  return true;
+}
+
+extern "C" bool ujs_kx_set_orientation(ujs_pointer obj, const double *m9)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  MT_Matrix3x3 m(m9[0], m9[1], m9[2], m9[3], m9[4], m9[5], m9[6], m9[7], m9[8]);
+  o->NodeSetGlobalOrientation(m);
+  o->NodeUpdateGS(0.0);
+  return true;
+}
+
+static PHY_IPhysicsController *kx_phys(KX_GameObject *o)
+{
+  PHY_IPhysicsController *pc = o->GetPhysicsController();
+  if (pc == nullptr) set_err("%s has no physics", o->GetName().c_str());
+  return pc;
+}
+
+extern "C" bool ujs_kx_apply(ujs_pointer obj, const char *what, const double *v, const double *at, bool local)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  MT_Vector3 vec(v[0], v[1], v[2]);
+  if (strcmp(what, "force") == 0) {
+    o->ApplyForce(vec, local);
+  }
+  else if (strcmp(what, "torque") == 0) {
+    o->ApplyTorque(vec, local);
+  }
+  else if (strcmp(what, "impulse") == 0) {
+    PHY_IPhysicsController *pc = kx_phys(o);
+    if (pc == nullptr) return false;
+    MT_Vector3 point = at ? MT_Vector3(at[0], at[1], at[2]) : o->NodeGetWorldPosition();
+    pc->ApplyImpulse(point, vec, local);
+  }
+  else {
+    set_err("unknown apply: %s", what);
+    return false;
+  }
+  return true;
+}
+
+extern "C" bool ujs_kx_get_mass(ujs_pointer obj, double *out)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  *out = o->GetMass();
+  return true;
+}
+
+extern "C" bool ujs_kx_set_mass(ujs_pointer obj, double mass)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  PHY_IPhysicsController *pc = kx_phys(o);
+  if (pc == nullptr) return false;
+  pc->SetMass(mass);
+  return true;
+}
+
+extern "C" bool ujs_kx_set_damping(ujs_pointer obj, double linear, double angular)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  if (kx_phys(o) == nullptr) return false;
+  o->setDamping((float)linear, (float)angular);
+  return true;
+}
+
+extern "C" bool ujs_kx_suspend_dynamics(ujs_pointer obj, bool suspend)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  PHY_IPhysicsController *pc = kx_phys(o);
+  if (pc == nullptr) return false;
+  if (suspend) pc->SuspendDynamics(false);
+  else pc->RestoreDynamics();
+  return true;
+}
+
+/* KX_RayCast::Callback target: first hit, skipping one object */
+struct ShimRay {
+  KX_GameObject *ignore = nullptr;
+  KX_GameObject *hit = nullptr;
+  bool RayHit(KX_ClientObjectInfo *client, KX_RayCast * /*result*/, void * /*data*/)
+  {
+    hit = client->m_gameobject;
+    return true;
+  }
+  bool NeedRayCast(KX_ClientObjectInfo *client, void * /*data*/)
+  {
+    return client->m_gameobject != ignore;
+  }
+};
+
+extern "C" bool ujs_kx_raycast(const double *from, const double *to, ujs_pointer ignore,
+                               ujs_pointer *hit, double *point, double *normal)
+{
+  KX_Scene *scene = kx_scene();
+  if (scene == nullptr) {
+    set_err("no game running");
+    return false;
+  }
+  ShimRay ray;
+  PHY_IPhysicsController *ignore_pc = nullptr;
+  if (ignore.data != nullptr) {
+    ray.ignore = kx_obj(ignore);
+    if (ray.ignore == nullptr) return false;
+    ignore_pc = ray.ignore->GetPhysicsController();
+  }
+  KX_RayCast::Callback<ShimRay, void> callback(&ray, ignore_pc, nullptr);
+  MT_Vector3 f(from[0], from[1], from[2]), t(to[0], to[1], to[2]);
+  hit->owner = 0; hit->type = 0; hit->data = nullptr;
+  if (KX_RayCast::RayTest(scene->GetPhysicsEnvironment(), f, t, callback) && ray.hit) {
+    *hit = kx_ptr(ray.hit);
+    for (int i = 0; i < 3; i++) {
+      point[i] = callback.m_hitPoint[i];
+      normal[i] = callback.m_hitNormal[i];
+    }
+  }
+  return true; /* a miss is not an error: hit->data stays null */
+}
+
+extern "C" bool ujs_kx_get_parent(ujs_pointer obj, ujs_pointer *out)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  *out = kx_ptr(o->GetParent());
+  return true;
+}
+
+extern "C" bool ujs_kx_set_parent(ujs_pointer obj, ujs_pointer parent)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  if (parent.data == nullptr) {
+    o->RemoveParent();
+    return true;
+  }
+  KX_GameObject *p = kx_obj(parent);
+  if (p == nullptr) return false;
+  o->SetParent(p, true, true);
+  return true;
+}
+
+extern "C" bool ujs_kx_spawn(const char *name, ujs_pointer at, double lifespan, ujs_pointer *out)
+{
+  KX_Scene *scene = kx_scene();
+  if (scene == nullptr) {
+    set_err("no game running");
+    return false;
+  }
+  KX_GameObject *original = nullptr;
+  for (EXP_ListValue<KX_GameObject> *list : {scene->GetInactiveList(), scene->GetObjectList()}) {
+    for (int i = 0; i < list->GetCount() && original == nullptr; i++) {
+      if (list->GetValue(i)->GetName() == name) original = list->GetValue(i);
+    }
+  }
+  if (original == nullptr) {
+    set_err("no object named %s to spawn", name);
+    return false;
+  }
+  KX_GameObject *ref = nullptr;
+  if (at.data != nullptr) {
+    ref = kx_obj(at);
+    if (ref == nullptr) return false;
+  }
+  KX_GameObject *made = scene->AddReplicaObject(original, ref ? ref : original, (float)lifespan);
+  if (made == nullptr) {
+    set_err("could not spawn %s", name);
+    return false;
+  }
+  *out = kx_ptr(made);
+  return true;
+}
+
+extern "C" bool ujs_kx_remove(ujs_pointer obj)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  kx_scene()->DelayedRemoveObject(o);
+  return true;
+}
+
+extern "C" bool ujs_kx_set_camera(ujs_pointer cam)
+{
+  KX_GameObject *o = kx_obj(cam);
+  if (o == nullptr) return false;
+  KX_Scene *scene = kx_scene();
+  EXP_ListValue<KX_Camera> *cams = scene->GetCameraList();
+  for (int i = 0; i < cams->GetCount(); i++) {
+    if (static_cast<KX_GameObject *>(cams->GetValue(i)) == o) {
+      scene->SetActiveCamera(cams->GetValue(i));
+      return true;
+    }
+  }
+  set_err("%s is not a camera", o->GetName().c_str());
+  return false;
+}
+
+extern "C" bool ujs_kx_set_visible(ujs_pointer obj, bool visible, bool recursive)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  o->SetVisible(visible, recursive);
+  return true;
+}
+
+extern "C" bool ujs_kx_blender_object(ujs_pointer obj, ujs_pointer *out)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  Object *ob = o->GetBlenderObject();
+  if (ob == nullptr) {
+    set_err("%s has no Blender object", o->GetName().c_str());
+    return false;
+  }
+  *out = as_ujs(RNA_id_pointer_create(&ob->id));
+  return true;
+}
+
+struct KxInputName {
+  const char *name;
+  SCA_IInputDevice::SCA_EnumInputs code;
+};
+#define KXI(n) {#n, SCA_IInputDevice::n}
+static const KxInputName kx_inputs[] = {
+    KXI(RETKEY), KXI(SPACEKEY), KXI(PADASTERKEY), KXI(COMMAKEY), KXI(MINUSKEY), KXI(PERIODKEY),
+    KXI(ZEROKEY), KXI(ONEKEY), KXI(TWOKEY), KXI(THREEKEY), KXI(FOURKEY), KXI(FIVEKEY),
+    KXI(SIXKEY), KXI(SEVENKEY), KXI(EIGHTKEY), KXI(NINEKEY), KXI(AKEY), KXI(BKEY), KXI(CKEY),
+    KXI(DKEY), KXI(EKEY), KXI(FKEY), KXI(GKEY), {"HKEY", SCA_IInputDevice::HKEY_}, KXI(IKEY),
+    KXI(JKEY), KXI(KKEY), KXI(LKEY), KXI(MKEY), KXI(NKEY), KXI(OKEY), KXI(PKEY), KXI(QKEY),
+    KXI(RKEY), KXI(SKEY), KXI(TKEY), KXI(UKEY), KXI(VKEY), KXI(WKEY), KXI(XKEY), KXI(YKEY),
+    KXI(ZKEY), KXI(CAPSLOCKKEY), KXI(LEFTCTRLKEY), KXI(LEFTALTKEY), KXI(RIGHTALTKEY),
+    KXI(RIGHTCTRLKEY), KXI(RIGHTSHIFTKEY), KXI(LEFTSHIFTKEY), KXI(ESCKEY), KXI(TABKEY),
+    KXI(LINEFEEDKEY), KXI(BACKSPACEKEY), KXI(DELKEY), KXI(SEMICOLONKEY), KXI(QUOTEKEY),
+    KXI(ACCENTGRAVEKEY), KXI(SLASHKEY), KXI(BACKSLASHKEY), KXI(EQUALKEY), KXI(LEFTBRACKETKEY),
+    KXI(RIGHTBRACKETKEY), KXI(LEFTARROWKEY), KXI(DOWNARROWKEY), KXI(RIGHTARROWKEY),
+    KXI(UPARROWKEY), KXI(PAD0), KXI(PAD1), KXI(PAD2), KXI(PAD3), KXI(PAD4), KXI(PAD5), KXI(PAD6),
+    KXI(PAD7), KXI(PAD8), KXI(PAD9), KXI(PADPERIOD), KXI(PADSLASHKEY), KXI(PADMINUS),
+    KXI(PADENTER), KXI(PADPLUSKEY), KXI(F1KEY), KXI(F2KEY), KXI(F3KEY), KXI(F4KEY), KXI(F5KEY),
+    KXI(F6KEY), KXI(F7KEY), KXI(F8KEY), KXI(F9KEY), KXI(F10KEY), KXI(F11KEY), KXI(F12KEY),
+    KXI(PAUSEKEY), KXI(INSERTKEY), KXI(HOMEKEY), KXI(PAGEUPKEY), KXI(PAGEDOWNKEY), KXI(ENDKEY),
+    KXI(LEFTMOUSE), KXI(MIDDLEMOUSE), KXI(RIGHTMOUSE), KXI(BUTTON4MOUSE), KXI(BUTTON5MOUSE),
+    KXI(WHEELUPMOUSE), KXI(WHEELDOWNMOUSE),
+};
+#undef KXI
+
+extern "C" bool ujs_kx_input(const char *name, int32_t *status)
+{
+  KX_KetsjiEngine *engine = KX_GetActiveEngine();
+  if (engine == nullptr || kx_scene() == nullptr) {
+    set_err("no game running");
+    return false;
+  }
+  for (const KxInputName &k : kx_inputs) {
+    if (strcmp(k.name, name) != 0) continue;
+    SCA_InputEvent &ev = engine->GetInputDevice()->GetInput(k.code);
+    int32_t s = 0;
+    if (ev.Find(SCA_InputEvent::ACTIVE) || ev.Find(SCA_InputEvent::JUSTACTIVATED)) s |= 1;
+    if (ev.Find(SCA_InputEvent::JUSTACTIVATED)) s |= 2;
+    if (ev.Find(SCA_InputEvent::JUSTRELEASED)) s |= 4;
+    *status = s;
+    return true;
+  }
+  set_err("unknown input: %s", name);
+  return false;
+}
+
+static RAS_ICanvas *kx_canvas()
+{
+  KX_KetsjiEngine *engine = KX_GetActiveEngine();
+  RAS_ICanvas *canvas = (engine && kx_scene()) ? engine->GetCanvas() : nullptr;
+  if (canvas == nullptr) set_err("no game running");
+  return canvas;
+}
+
+extern "C" bool ujs_kx_mouse(double *xy)
+{
+  RAS_ICanvas *canvas = kx_canvas();
+  if (canvas == nullptr) return false;
+  SCA_IInputDevice *dev = KX_GetActiveEngine()->GetInputDevice();
+  const SCA_InputEvent &x = dev->GetInput(SCA_IInputDevice::MOUSEX);
+  const SCA_InputEvent &y = dev->GetInput(SCA_IInputDevice::MOUSEY);
+  xy[0] = x.m_values.empty() ? 0.5 : canvas->GetMouseNormalizedX(x.m_values.back());
+  xy[1] = y.m_values.empty() ? 0.5 : canvas->GetMouseNormalizedY(y.m_values.back());
+  return true;
+}
+
+extern "C" bool ujs_kx_set_mouse(double x, double y)
+{
+  RAS_ICanvas *canvas = kx_canvas();
+  if (canvas == nullptr) return false;
+  canvas->SetMousePosition((int)(x * canvas->GetWidth()), (int)(y * canvas->GetHeight()));
+  return true;
+}
+
+extern "C" bool ujs_kx_show_mouse(bool visible)
+{
+  RAS_ICanvas *canvas = kx_canvas();
+  if (canvas == nullptr) return false;
+  canvas->SetMouseState(visible ? RAS_ICanvas::MOUSE_NORMAL : RAS_ICanvas::MOUSE_INVISIBLE);
+  return true;
+}
+
+extern "C" bool ujs_kx_screenshot(const char *path)
+{
+  RAS_ICanvas *canvas = kx_canvas();
+  if (canvas == nullptr) return false;
+  canvas->MakeScreenShot(path);
+  return true;
+}
+
+extern "C" bool ujs_kx_frame_info(double *out3)
+{
+  KX_KetsjiEngine *engine = KX_GetActiveEngine();
+  if (engine == nullptr || kx_scene() == nullptr) {
+    set_err("no game running");
+    return false;
+  }
+  out3[0] = engine->GetAverageFrameRate();
+  out3[1] = engine->GetClockTime();
+  out3[2] = engine->GetFrameTime();
+  return true;
+}
+
+extern "C" bool ujs_kx_canvas_size(int32_t *w, int32_t *h)
+{
+  RAS_ICanvas *canvas = kx_canvas();
+  if (canvas == nullptr) return false;
+  *w = canvas->GetWidth();
+  *h = canvas->GetHeight();
   return true;
 }
 
@@ -1060,6 +1507,62 @@ extern "C" bool ujs_operator_call_ex(const char *opname, int32_t n, const char *
 
 static double *g_ret_floats = nullptr;
 
+/* The raw slot of `parm` in `list` (for PROP_DYNAMIC params, the
+ * ParameterDynAlloc itself, unlike RNA_parameter_get). */
+static void *param_slot(ParameterList *list, PropertyRNA *parm)
+{
+  ParameterIterator iter;
+  void *slot = nullptr;
+  RNA_parameter_list_begin(list, &iter);
+  for (; iter.valid; RNA_parameter_list_next(&iter)) {
+    if (iter.parm == parm) {
+      slot = iter.data;
+      break;
+    }
+  }
+  RNA_parameter_list_end(&iter);
+  return slot;
+}
+
+/* Fill a dynamic (PROP_DYNAMIC) input: strings and int/bool/float arrays. */
+static bool write_dynamic_param(PropertyRNA *parm, void *slot, const ujs_value &v)
+{
+  ParameterDynAlloc *alloc = static_cast<ParameterDynAlloc *>(slot);
+  if (alloc->array) {
+    MEM_delete_void(alloc->array);
+    alloc->array = nullptr;
+  }
+  switch (RNA_property_type(parm)) {
+    case PROP_STRING: {
+      const char *str = v.s ? v.s : "";
+      size_t n = strlen(str) + 1;
+      char *buf = static_cast<char *>(MEM_new_uninitialized(n, __func__));
+      memcpy(buf, str, n);
+      alloc->array = buf;
+      alloc->array_tot = (int)n - 1;
+      return true;
+    }
+    case PROP_INT:
+    case PROP_BOOLEAN: {
+      int *buf = static_cast<int *>(MEM_new_uninitialized(sizeof(int) * (v.len > 0 ? v.len : 1), __func__));
+      for (int i = 0; i < v.len; i++) buf[i] = (int)v.fa[i];
+      alloc->array = buf;
+      alloc->array_tot = v.len;
+      return true;
+    }
+    case PROP_FLOAT: {
+      float *buf = static_cast<float *>(MEM_new_uninitialized(sizeof(float) * (v.len > 0 ? v.len : 1), __func__));
+      for (int i = 0; i < v.len; i++) buf[i] = (float)v.fa[i];
+      alloc->array = buf;
+      alloc->array_tot = v.len;
+      return true;
+    }
+    default:
+      set_err("%s: unsupported dynamic parameter", RNA_property_identifier(parm));
+      return false;
+  }
+}
+
 /* Write `v` into parameter slot `data` for parameter `parm`, as bpy does. */
 static bool write_param(bContext *C, PointerRNA *self, PropertyRNA *parm, void *data, const ujs_value &v)
 {
@@ -1152,9 +1655,19 @@ static void read_param(PointerRNA *self, PropertyRNA *parm, ParameterList *list,
   const int flag = RNA_property_flag(parm);
   const int flag_parameter = RNA_parameter_flag(parm);
   int len = 0;
-  if (RNA_property_array_check(parm)) {
-    len = (flag & PROP_DYNAMIC) ? RNA_parameter_dynamic_length_get(list, parm) :
-                                  RNA_property_array_length(self, parm);
+  if (flag & PROP_DYNAMIC) {
+    /* `data` is the ParameterDynAlloc: unwrap to the array it holds */
+    ParameterDynAlloc *alloc = static_cast<ParameterDynAlloc *>(data);
+    data = alloc->array;
+    len = RNA_property_type(parm) == PROP_STRING ? 0 : alloc->array_tot;
+    if (data == nullptr) {
+      memset(out, 0, sizeof *out);
+      out->type = UJS_VAL_NONE;
+      return;
+    }
+  }
+  else if (RNA_property_array_check(parm)) {
+    len = RNA_property_array_length(self, parm);
   }
   memset(out, 0, sizeof *out);
   out->type = UJS_VAL_NONE;
@@ -1200,11 +1713,11 @@ static void read_param(PointerRNA *self, PropertyRNA *parm, ParameterList *list,
       return;
     }
     case PROP_STRING: {
-      const char *str = (flag & PROP_THICK_WRAP) ? static_cast<const char *>(data) :
-                                                   *static_cast<const char **>(data);
-      snprintf(g_str_buf, sizeof g_str_buf, "%s", str ? str : "");
+      const char *str = (flag & (PROP_THICK_WRAP | PROP_DYNAMIC)) ? static_cast<const char *>(data) :
+                                                                    *static_cast<const char **>(data);
+      g_long_str = str ? str : "";
       out->type = UJS_PROP_STRING;
-      out->s = g_str_buf;
+      out->s = g_long_str.c_str();
       return;
     }
     case PROP_POINTER: {
@@ -1260,9 +1773,10 @@ extern "C" bool ujs_func_call(ujs_pointer self_p, const char *fname, int32_t n,
       RNA_parameter_list_free(&list);
       return false;
     }
-    void *data;
-    RNA_parameter_get(&list, parm, &data);
-    if (!write_param(C, &self, parm, data, args[i])) {
+    void *slot = param_slot(&list, parm);
+    bool wrote = (RNA_property_flag(parm) & PROP_DYNAMIC) ? write_dynamic_param(parm, slot, args[i]) :
+                                                           write_param(C, &self, parm, slot, args[i]);
+    if (!wrote) {
       RNA_parameter_list_free(&list);
       return false;
     }
@@ -1302,9 +1816,7 @@ extern "C" bool ujs_func_call(ujs_pointer self_p, const char *fname, int32_t n,
   RNA_parameter_list_begin(&list, &iter);
   for (; iter.valid; RNA_parameter_list_next(&iter)) {
     if (RNA_parameter_flag(iter.parm) & PARM_OUTPUT) {
-      void *data;
-      RNA_parameter_get(&list, iter.parm, &data);
-      read_param(&self, iter.parm, &list, data, ret);
+      read_param(&self, iter.parm, &list, iter.data, ret);
       break;
     }
   }

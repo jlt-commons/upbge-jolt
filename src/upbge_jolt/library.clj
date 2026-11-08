@@ -14,6 +14,7 @@
             [upbge-jolt.bridge]     ; bake the bridge into the runtime
             [upbge-jolt.bpy]        ; and the ergonomic REPL layer
             [upbge-jolt.bge]        ; and the game-engine (KX) layer
+            [upbge-jolt.game :as game] ; game sessions, per-frame logic, main.clj
             [jolt.nrepl]            ; static so --library bakes it in
             [jolt.ffi :as ffi]))
 
@@ -21,6 +22,9 @@
 ;; call it from the thread that ran jolt_library_init while jolt threads are
 ;; active; the tick body itself reaches collection safe points.
 (ffi/export! "uj_tick" core/tick [] :void :collect-safe)
+
+;; drive game sessions (main.clj autoload, on-frame! handlers) from the tick
+(game/install!)
 
 ;; returns the port actually bound (the OS pick when passed 0), or -1 when
 ;; the server failed to start
