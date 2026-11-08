@@ -27,18 +27,31 @@
                   :main-opts   ["-m" "upbge-jolt.test-runner"]}}
 
  :tasks {:requires ([babashka.fs :as fs])
-         :init (do (def mac? (some? (re-find #"^Mac" (System/getProperty "os.name"))))
+         :init (do (def os-name (System/getProperty "os.name"))
+                   (def mac? (some? (re-find #"^Mac" os-name)))
                    (def shlib (str "native/libupbge_shim." (if mac? "dylib" "so")))
-                   ;; the UPBGE checkout and its build tree (GNUmakefile puts
-                   ;; BUILD_DIR at dirname-of-source/build_$(OS), i.e. inside
-                   ;; native/ when the clone lives there)
+                   ;; GNUmakefile's OS/CPU names: lib/$(OS)_$(CPU) for the deps
+                   ;; harvest (macos_arm64, linux_x64, ...), build_$(OS_NCASE)
+                   ;; for the build tree (build_darwin, build_linux)
+                   (def upbge-os (cond (re-find #"^Mac" os-name) "macos"
+                                       (re-find #"^Linux" os-name) "linux"
+                                       :else "windows"))
+                   (def upbge-os-case (cond mac? "darwin"
+                                            (re-find #"^Linux" os-name) "linux"
+                                            :else "windows"))
+                   (def upbge-cpu (case (System/getProperty "os.arch")
+                                    "aarch64" "arm64"
+                                    ("x86_64" "amd64") "x64"
+                                    (System/getProperty "os.arch")))
                    (def upbge-src "native/upbge")
-                   (def upbge-build "native/build_darwin")
-                   (def blender-bin "native/build_darwin/bin/Blender.app/Contents/MacOS/Blender")
+                   (def upbge-build (str "native/build_" upbge-os-case))
+                   (def blender-bin (str upbge-build "/bin/"
+                                         (if mac? "Blender.app/Contents/MacOS/Blender"
+                                             "blender")))
                    ;; make deps harvests the prebuilt platform libs into the
-                   ;; clone's lib/macos_arm64 (before that the dir holds only
+                   ;; clone's lib/$(OS)_$(CPU) (before that the dir holds only
                    ;; deps.md from the repo), so any harvested lib marks deps done
-                   (def deps-marker "native/upbge/lib/macos_arm64/imath"))
+                   (def deps-marker (str upbge-src "/lib/" upbge-os "_" upbge-cpu "/imath")))
 
          native
          {:doc "build the mock host shim dylib (for tests; the real shim needs a UPBGE build)"
