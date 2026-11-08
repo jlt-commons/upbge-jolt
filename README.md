@@ -30,6 +30,14 @@ against the running editor or game:
 items by name or index, `b/foreach-get`/`b/foreach-set!` move bulk data
 (vertex coordinates, UVs, pixels). Enums take identifiers (`"SUN"`).
 
+## Documentation
+
+[`docs/`](docs/README.md): getting started, building scenes, game logic,
+releasing, architecture, troubleshooting, and the [API reference](docs/api.md)
+(generated from docstrings: `jolt docs`). For AI agents,
+[`skills/upbge-jolt/SKILL.md`](skills/upbge-jolt/SKILL.md) is a condensed
+working guide.
+
 ## How it fits together
 
 ```
@@ -98,6 +106,7 @@ jolt native   # build the mock shim dylib
 jolt test     # unit tests (headless, mock shim)
 jolt lib      # build libjolt_upbge.dylib (--library)
 jolt metrics  # code-metrics report (jolt-metrics) over src
+jolt docs     # regenerate docs/api.md from the source docstrings
 jolt upbge-deps  # clone UPBGE into native/upbge + build its dependencies
 jolt upbge       # build the full UPBGE/Blender binary (deps first)
 ```

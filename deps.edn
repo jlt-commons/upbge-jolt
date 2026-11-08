@@ -96,6 +96,10 @@
                   (shell "make" "-C" upbge-src "-j"
                          (str (.availableProcessors (Runtime/getRuntime)))))}
 
+         docs
+         {:doc "regenerate docs/api.md from the source docstrings"
+          :task (shell "python3" "docs/gen_api.py")}
+
          lib
          {:doc "build libjolt_upbge.{dylib,so} via jolt build --library"
           :task (do (shell "jolt" "build" "--library" "-m" "upbge-jolt.library" "-o" "libjolt_upbge")
