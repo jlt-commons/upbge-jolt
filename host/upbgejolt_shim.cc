@@ -26,6 +26,7 @@
 
 #include "DNA_ID.h"
 #include "RNA_access.hh"
+#include "RNA_prototypes.hh"
 #include "RNA_types.hh"
 
 #include "DNA_collection_types.h"
@@ -34,12 +35,14 @@
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
-#include "BKE_collection.h"
-#include "BKE_global.h"
-#include "BKE_lib_id.h"
+#include "BKE_collection.hh"
+#include "BKE_global.hh"
+#include "BKE_idtype.hh"
+#include "BKE_lib_id.hh"
 #include "BKE_mesh.h"
 
-#include "BLI_math_vector.h"
+#include "BLI_math_vector_types.hh"
+#include "BLI_span.hh"
 
 #include <cstdarg>
 #include <cstdio>
@@ -47,6 +50,9 @@
 #include <cstring>
 #include <optional>
 #include <string>
+
+/* Blender 4.x moved the RNA/DNA types into `namespace blender`. */
+using namespace blender;
 
 /* ---- error surface -------------------------------------------------------- */
 
@@ -88,8 +94,7 @@ static ujs_pointer as_ujs(const PointerRNA &ptr)
 
 /* find a property; nullptr + set_err on miss. An RNA pointer without a struct
  * type is invalid — RNA_struct_find_property would deref the null type — so
- * reject it regardless of whether data is set (a typeless pointer with data is
- * the malformed case the old both-null check let through). */
+ * reject it regardless of whether data is set. */
 static PropertyRNA *find_prop(ujs_pointer owner, const char *name)
 {
   PointerRNA ptr = as_rna(owner);
@@ -158,7 +163,8 @@ extern "C" bool ujs_prop_find(ujs_pointer owner, const char *name, ujs_prop_desc
 {
   PropertyRNA *prop = find_prop(owner, name);
   if (prop == nullptr) return false;
-  desc_of(as_rna(owner), prop, out);
+  PointerRNA ptr = as_rna(owner);
+  desc_of(ptr, prop, out);
   return true;
 }
 
@@ -227,7 +233,8 @@ extern "C" bool ujs_get_bool(ujs_pointer owner, const char *name, bool *out)
 {
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_BOOLEAN);
   if (prop == nullptr) return false;
-  *out = RNA_property_boolean_get(&as_rna(owner), prop);
+  PointerRNA ptr = as_rna(owner);
+  *out = RNA_property_boolean_get(&ptr, prop);
   return true;
 }
 
@@ -235,7 +242,8 @@ extern "C" bool ujs_get_int(ujs_pointer owner, const char *name, int64_t *out)
 {
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_INT);
   if (prop == nullptr) return false;
-  *out = RNA_property_int_get(&as_rna(owner), prop);
+  PointerRNA ptr = as_rna(owner);
+  *out = RNA_property_int_get(&ptr, prop);
   return true;
 }
 
@@ -256,7 +264,8 @@ extern "C" bool ujs_get_string(ujs_pointer owner, const char *name, const char *
 {
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_STRING);
   if (prop == nullptr) return false;
-  std::string s = RNA_property_string_get(&as_rna(owner), prop);
+  PointerRNA ptr = as_rna(owner);
+  std::string s = RNA_property_string_get(&ptr, prop);
   snprintf(g_str_buf, sizeof g_str_buf, "%s", s.c_str());
   *out = g_str_buf;
   return true;
@@ -286,7 +295,8 @@ extern "C" bool ujs_get_pointer(ujs_pointer owner, const char *name, ujs_pointer
 {
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_POINTER);
   if (prop == nullptr) return false;
-  PointerRNA tgt = RNA_property_pointer_get(&as_rna(owner), prop);
+  PointerRNA ptr = as_rna(owner);
+  PointerRNA tgt = RNA_property_pointer_get(&ptr, prop);
   if (tgt.data == nullptr) {
     out->owner = 0;
     out->type = 0;
@@ -341,7 +351,12 @@ extern "C" bool ujs_get_float_array_n(ujs_pointer owner, const char *name, doubl
   return true;
 }
 
-/* ---- typed set ---------------------------------------------------------------- */
+/* ---- typed set ----------------------------------------------------------------
+ *
+ * The RNA_property_*_set calls write the value; the depsgraph update that
+ * Blender's Python layer triggers (via rna_property_update) is not performed
+ * here yet — a later step should tag the ID with DEG_id_tag_update so the
+ * game engine sees property changes on the next frame. */
 
 extern "C" bool ujs_set_bool(ujs_pointer owner, const char *name, bool v)
 {
@@ -349,7 +364,6 @@ extern "C" bool ujs_set_bool(ujs_pointer owner, const char *name, bool v)
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
   RNA_property_boolean_set(&ptr, prop, v);
-  RNA_property_update_auto(&ptr, prop);
   return true;
 }
 
@@ -359,7 +373,6 @@ extern "C" bool ujs_set_int(ujs_pointer owner, const char *name, int64_t v)
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
   RNA_property_int_set(&ptr, prop, (int)v);
-  RNA_property_update_auto(&ptr, prop);
   return true;
 }
 
@@ -373,7 +386,6 @@ extern "C" bool ujs_set_float(ujs_pointer owner, const char *name, double v)
     return false;
   }
   RNA_property_float_set(&ptr, prop, (float)v);
-  RNA_property_update_auto(&ptr, prop);
   return true;
 }
 
@@ -383,7 +395,6 @@ extern "C" bool ujs_set_string(ujs_pointer owner, const char *name, const char *
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
   RNA_property_string_set(&ptr, prop, v);
-  RNA_property_update_auto(&ptr, prop);
   return true;
 }
 
@@ -393,7 +404,6 @@ extern "C" bool ujs_set_enum(ujs_pointer owner, const char *name, int64_t v)
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
   RNA_property_enum_set(&ptr, prop, (int)v);
-  RNA_property_update_auto(&ptr, prop);
   return true;
 }
 
@@ -401,8 +411,9 @@ extern "C" bool ujs_set_pointer(ujs_pointer owner, const char *name, ujs_pointer
 {
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_POINTER);
   if (prop == nullptr) return false;
+  PointerRNA ptr = as_rna(owner);
   PointerRNA tgt = as_rna(v);
-  RNA_property_pointer_set(&as_rna(owner), prop, tgt, nullptr);
+  RNA_property_pointer_set(&ptr, prop, tgt, nullptr);
   return true;
 }
 
@@ -423,7 +434,6 @@ extern "C" bool ujs_set_float_array(ujs_pointer owner, const char *name, const d
   float *tmp = (float *)malloc(n * sizeof(float));
   for (int i = 0; i < n; i++) tmp[i] = (float)v[i];
   RNA_property_float_set_array(&ptr, prop, tmp);
-  RNA_property_update_auto(&ptr, prop);
   free(tmp);
   return true;
 }
@@ -434,7 +444,8 @@ extern "C" bool ujs_coll_len(ujs_pointer owner, const char *name, int64_t *out)
 {
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_COLLECTION);
   if (prop == nullptr) return false;
-  *out = RNA_property_collection_length(&as_rna(owner), prop);
+  PointerRNA ptr = as_rna(owner);
+  *out = RNA_property_collection_length(&ptr, prop);
   return true;
 }
 
@@ -446,8 +457,9 @@ extern "C" ujs_iter_t ujs_coll_iter(ujs_pointer owner, const char *name)
 {
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_COLLECTION);
   if (prop == nullptr) return 0;
+  PointerRNA ptr = as_rna(owner);
   coll_iter *it = (coll_iter *)calloc(1, sizeof *it);
-  RNA_property_collection_begin(&as_rna(owner), prop, &it->rna);
+  RNA_property_collection_begin(&ptr, prop, &it->rna);
   return (ujs_iter_t)(intptr_t)it;
 }
 
@@ -468,13 +480,7 @@ extern "C" void ujs_coll_iter_free(ujs_iter_t h)
   free(it);
 }
 
-/* ---- creation / structural mutation ------------------------------------------
- *
- * Scene-graph editing over the DNA/BKE layer. These are unverified until a
- * UPBGE build is available; the API surface is the stable Blender 2.8x-3.x
- * one, but the exact BKE_mesh_* signatures and the mesh data layout should be
- * checked against the target UPBGE tree before relying on them.
- */
+/* ---- creation / structural mutation ------------------------------------------ */
 
 extern "C" bool ujs_id_new(const char *type_name, const char *name, ujs_pointer *out)
 {
@@ -483,7 +489,7 @@ extern "C" bool ujs_id_new(const char *type_name, const char *name, ujs_pointer 
     set_err("unknown id type: %s", type_name);
     return false;
   }
-  ID *id = BKE_id_new(G_MAIN, idcode, name);
+  ID *id = static_cast<ID *>(BKE_id_new(G_MAIN, idcode, name));
   if (id == nullptr) {
     set_err("failed to create id: %s", name);
     return false;
@@ -515,20 +521,20 @@ extern "C" bool ujs_mesh_from_pydata(ujs_pointer mesh,
   }
 
   Mesh *dst = static_cast<Mesh *>(ptr.data);
-  Mesh *me = BKE_mesh_new_nomain(nverts, 0, nindices, nfaces);
+  Mesh *me = BKE_mesh_new_nomain(nverts, 0, nfaces, nindices);
+  MutableSpan<float3> positions = me->vert_positions_for_write();
+  MutableSpan<int> out_offsets = me->face_offsets_for_write();
+  MutableSpan<int> corner_verts = me->corner_verts_for_write();
   for (int i = 0; i < nverts; i++) {
-    copy_v3fl_v3db(me->mvert[i].co, &verts[i * 3]);
+    positions[i] = float3((float)verts[i * 3], (float)verts[i * 3 + 1], (float)verts[i * 3 + 2]);
   }
-  int li = 0;
-  for (int f = 0; f < nfaces; f++) {
-    MPoly *mp = &me->mpoly[f];
-    mp->loopstart = face_offsets[f];
-    mp->totloop = face_offsets[f + 1] - face_offsets[f];
-    for (int j = mp->loopstart; j < mp->loopstart + mp->totloop; j++, li++) {
-      me->mloop[j].v = face_indices[li];
-    }
+  for (int f = 0; f <= nfaces; f++) {
+    out_offsets[f] = face_offsets[f];
   }
-  BKE_mesh_nomain_to_mesh(me, dst, &CD_MASK_MESH, &CD_MASK_MESH);
+  for (int i = 0; i < nindices; i++) {
+    corner_verts[i] = face_indices[i];
+  }
+  BKE_mesh_nomain_to_mesh(me, dst, nullptr);
   return true;
 }
 
@@ -540,7 +546,7 @@ static Collection *coll_of(ujs_pointer coll, const char *name)
   PointerRNA ptr = as_rna(coll);
   if (ptr.type == nullptr || ptr.data == nullptr) return nullptr;
   if (strcmp(name, "objects") == 0 &&
-      RNA_struct_is_a(ptr.type, &RNA_Scene)) {
+      RNA_struct_is_a(ptr.type, RNA_Scene)) {
     return static_cast<Scene *>(ptr.data)->master_collection;
   }
   return nullptr;
