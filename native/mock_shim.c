@@ -15,7 +15,7 @@
 #include <string.h>
 
 #define PROP_MAX 16
-#define OBJ_MAX 8
+#define OBJ_MAX 32
 
 typedef struct {
   char name[64];
@@ -26,11 +26,13 @@ typedef struct {
     bool b;
     int64_t i;
     double f;
-    double fa[16];
+    double fa[16];   /* UJS_PROP_FLOAT, array_len > 0 */
+    double *dyn;     /* UJS_PROP_FLOAT, array_len == -1: malloc'd */
     char s[128];
     int64_t e;
     int obj_index; /* UJS_PROP_POINTER: index into objects, -1 = null */
   } v;
+  int dyn_len; /* element count of v.dyn */
   char enum_id[64];
 } mock_prop;
 
@@ -90,6 +92,13 @@ static void desc_of(const mock_prop *p, ujs_prop_desc *out) {
 }
 
 void ujs_test_reset(void) {
+  /* free dynamic float arrays before rebuilding the table */
+  for (int i = 0; i < g_nobjects; i++) {
+    mock_obj *o = &g_objects[i];
+    for (int j = 0; j < o->nprops; j++)
+      if (o->props[j].type == UJS_PROP_FLOAT && o->props[j].array_len == -1)
+        free(o->props[j].v.dyn);
+  }
   g_nobjects = 0;
   g_last_error[0] = 0;
 
@@ -121,10 +130,12 @@ void ujs_test_reset(void) {
 
   mock_obj *mesh = add_obj("Mesh");
   mock_prop *verts = add_prop(mesh, "vertices", UJS_PROP_FLOAT, -1, NULL);
-  /* three vertices, xyz interleaved */
-  verts->v.fa[0] = 0; verts->v.fa[1] = 0; verts->v.fa[2] = 0;
-  verts->v.fa[3] = 1; verts->v.fa[4] = 0; verts->v.fa[5] = 0;
-  verts->v.fa[6] = 0; verts->v.fa[7] = 1; verts->v.fa[8] = 0;
+  /* three vertices, xyz interleaved, dynamic-length */
+  verts->dyn_len = 9;
+  verts->v.dyn = malloc(9 * sizeof(double));
+  verts->v.dyn[0] = 0; verts->v.dyn[1] = 0; verts->v.dyn[2] = 0;
+  verts->v.dyn[3] = 1; verts->v.dyn[4] = 0; verts->v.dyn[5] = 0;
+  verts->v.dyn[6] = 0; verts->v.dyn[7] = 1; verts->v.dyn[8] = 0;
 }
 
 /* --- error / root --------------------------------------------------------- */
@@ -243,7 +254,11 @@ bool ujs_get_pointer(ujs_pointer owner, const char *name, ujs_pointer *out) {
 }
 
 static int dyn_len(const mock_prop *p) {
-  return p->array_len > 0 ? p->array_len : 9;
+  return p->array_len > 0 ? p->array_len : p->dyn_len;
+}
+
+static double *dyn_data(const mock_prop *p) {
+  return p->array_len > 0 ? p->v.fa : p->v.dyn;
 }
 
 bool ujs_get_float_array(ujs_pointer owner, const char *name, double *out, int32_t len) {
@@ -254,7 +269,7 @@ bool ujs_get_float_array(ujs_pointer owner, const char *name, double *out, int32
   if (p->type != UJS_PROP_FLOAT || p->array_len == 0) { set_err("not a float array property"); return false; }
   int n = dyn_len(p);
   if (len != n) { set_err("array length mismatch"); return false; }
-  memcpy(out, p->v.fa, n * sizeof(double));
+  memcpy(out, dyn_data(p), n * sizeof(double));
   return true;
 }
 
@@ -266,7 +281,7 @@ bool ujs_get_float_array_n(ujs_pointer owner, const char *name, double **out_dat
   if (p->type != UJS_PROP_FLOAT || p->array_len == 0) { set_err("not a float array property"); return false; }
   int n = dyn_len(p);
   double *d = malloc(n * sizeof(double));
-  memcpy(d, p->v.fa, n * sizeof(double));
+  memcpy(d, dyn_data(p), n * sizeof(double));
   *out_data = d;
   *out_len = n;
   return true;
@@ -343,7 +358,7 @@ bool ujs_set_float_array(ujs_pointer owner, const char *name, const double *v, i
   if (p->type != UJS_PROP_FLOAT || p->array_len == 0) { set_err("not a float array property"); return false; }
   int n = dyn_len(p);
   if (len != n) { set_err("array length mismatch"); return false; }
-  memcpy(p->v.fa, v, n * sizeof(double));
+  memcpy(dyn_data(p), v, n * sizeof(double));
   return true;
 }
 
@@ -383,6 +398,90 @@ bool ujs_coll_next(ujs_iter_t h, ujs_pointer *out) {
 }
 
 void ujs_coll_iter_free(ujs_iter_t h) { free((void *)(intptr_t)h); }
+
+/* --- creation / structural mutation --------------------------------------- */
+
+bool ujs_id_new(const char *type_name, const char *name, ujs_pointer *out) {
+  bool is_object = strcmp(type_name, "Object") == 0;
+  bool is_mesh   = strcmp(type_name, "Mesh") == 0;
+  if (!is_object && !is_mesh) { set_err("unknown id type"); return false; }
+  if (g_nobjects >= OBJ_MAX) { set_err("object table full"); return false; }
+  int idx = g_nobjects;
+  mock_obj *o = add_obj(name);
+  mock_prop *np = add_prop(o, "name", UJS_PROP_STRING, 0, NULL);
+  snprintf(np->v.s, sizeof np->v.s, "%s", name);
+  if (is_object) {
+    mock_prop *loc = add_prop(o, "location", UJS_PROP_FLOAT, 3, NULL);
+    loc->v.fa[0] = 0; loc->v.fa[1] = 0; loc->v.fa[2] = 0;
+    add_prop(o, "data", UJS_PROP_POINTER, 0, "Mesh")->v.obj_index = -1;
+  } else {
+    add_prop(o, "vertices", UJS_PROP_FLOAT, -1, NULL);
+  }
+  out->owner = idx;
+  out->type = 0;
+  out->data = &g_objects[idx];
+  return true;
+}
+
+bool ujs_mesh_from_pydata(ujs_pointer mesh,
+                          const double *verts, int32_t nverts,
+                          const int32_t *face_offsets, int32_t nfaces,
+                          const int32_t *face_indices, int32_t nindices) {
+  mock_obj *o = obj_of(mesh);
+  if (!o) { set_err("invalid pointer"); return false; }
+  mock_prop *p = prop_find(o, "vertices");
+  if (!p || p->type != UJS_PROP_FLOAT || p->array_len != -1) {
+    set_err("not a mesh (no dynamic vertices property)"); return false;
+  }
+  /* validate the face structure: offsets monotonic and in range, indices in
+   * [0, nverts) -- the mock stores vertices only but still checks the input */
+  if (nfaces > 0) {
+    if (face_offsets[0] != 0 || face_offsets[nfaces] != nindices) {
+      set_err("bad face offsets"); return false;
+    }
+    for (int i = 0; i < nfaces; i++)
+      if (face_offsets[i] > face_offsets[i + 1]) { set_err("bad face offsets"); return false; }
+    for (int i = 0; i < nindices; i++)
+      if (face_indices[i] < 0 || face_indices[i] >= nverts) { set_err("face index out of range"); return false; }
+  }
+  int n = nverts * 3;
+  double *d = malloc(n * sizeof(double));
+  memcpy(d, verts, n * sizeof(double));
+  free(p->v.dyn);
+  p->v.dyn = d;
+  p->dyn_len = n;
+  return true;
+}
+
+bool ujs_coll_add(ujs_pointer coll, const char *name, ujs_pointer member) {
+  mock_obj *o = obj_of(coll);
+  if (!o) { set_err("invalid pointer"); return false; }
+  if (strcmp(o->name, "Scene") != 0 || strcmp(name, "objects") != 0) {
+    set_err("not a collection property"); return false;
+  }
+  if (!obj_of(member)) { set_err("invalid member"); return false; }
+  for (int i = 0; i < o->ncoll; i++)
+    if (o->coll_members[i] == (int)member.owner) return true; /* already linked */
+  if (o->ncoll >= OBJ_MAX) { set_err("collection full"); return false; }
+  o->coll_members[o->ncoll++] = (int)member.owner;
+  return true;
+}
+
+bool ujs_coll_remove(ujs_pointer coll, const char *name, ujs_pointer member) {
+  mock_obj *o = obj_of(coll);
+  if (!o) { set_err("invalid pointer"); return false; }
+  if (strcmp(o->name, "Scene") != 0 || strcmp(name, "objects") != 0) {
+    set_err("not a collection property"); return false;
+  }
+  for (int i = 0; i < o->ncoll; i++) {
+    if (o->coll_members[i] == (int)member.owner) {
+      for (int j = i; j < o->ncoll - 1; j++) o->coll_members[j] = o->coll_members[j + 1];
+      o->ncoll--;
+      return true;
+    }
+  }
+  return true; /* not present: removal is a no-op */
+}
 
 /* free memory this shim handed out (ujs_get_float_array_n) */
 void ujs_free(void *ptr) { free(ptr); }

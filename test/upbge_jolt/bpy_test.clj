@@ -45,3 +45,20 @@
     (testing "translate! adds"
       (bpy/translate! cube [1 1 1])
       (is (= [6.0 7.0 8.0] (bpy/pos cube))))))
+
+(deftest add-object
+  (testing "add! builds a mesh object, links it, and carries geometry"
+    (let [obj (bpy/add! "Quad" [[0 0 0] [1 0 0] [0 1 0] [1 1 0]]
+                         [[0 1 2] [1 3 2]])]
+      (is (map? obj))
+      (is (= "Quad" (bpy/name-of obj)))
+      (is (= ["Cube" "Lamp" "Quad"] (mapv bpy/name-of (bpy/objects))))
+      (is (= 12 (count (bpy/get (bpy/get obj :data) :vertices)))))))
+
+(deftest link-unlink
+  (testing "link! is idempotent, unlink! removes"
+    (let [obj (bpy/add! "Tmp" [[0 0 0] [1 0 0] [0 1 0]] [[0 1 2]])]
+      (bpy/link! obj)
+      (is (= ["Cube" "Lamp" "Tmp"] (mapv bpy/name-of (bpy/objects))))
+      (bpy/unlink! obj)
+      (is (= ["Cube" "Lamp"] (mapv bpy/name-of (bpy/objects)))))))

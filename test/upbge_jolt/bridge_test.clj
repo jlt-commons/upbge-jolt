@@ -110,3 +110,44 @@
         (is (= :string (:type (by-name "name"))))
         (is (= :pointer (:type (by-name "data"))))
         (is (= "Mesh" (:item-type (by-name "data"))))))))
+
+(deftest id-new
+  (testing "id-new makes a mesh and an object"
+    (let [mesh (b/id-new "Mesh" "Tri")]
+      (is (map? mesh))
+      (is (= "Tri" (b/get mesh "name"))))
+    (let [obj (b/id-new "Object" "Thing")]
+      (is (= "Thing" (b/get obj "name")))
+      (is (= [0.0 0.0 0.0] (b/get obj "location")))
+      (is (nil? (b/get obj "data")))))
+  (testing "id-new rejects an unknown type"
+    (is (thrown-with-msg? Exception #"unknown id type"
+          (b/id-new "Nonsense" "x")))))
+
+(deftest mesh-from-pydata
+  (testing "builds geometry from verts and faces"
+    (let [mesh (b/id-new "Mesh" "Quad")]
+      (b/mesh-from-pydata! mesh [[0 0 0] [1 0 0] [0 1 0] [1 1 0]]
+                            [[0 1 2] [1 3 2]])
+      (is (= [0.0 0.0 0.0 1.0 0.0 0.0 0.0 1.0 0.0 1.0 1.0 0.0]
+             (b/get mesh "vertices")))))
+  (testing "rejects out-of-range face indices"
+    (let [mesh (b/id-new "Mesh" "Bad")]
+      (is (thrown-with-msg? Exception #"face index out of range"
+            (b/mesh-from-pydata! mesh [[0 0 0] [1 0 0]] [[0 1 5]]))))))
+
+(deftest scene-graph-mutation
+  (let [scene (b/root)]
+    (testing "coll-add!/coll-remove! manage the scene graph"
+      (let [obj (b/id-new "Object" "Extra")]
+        (b/coll-add! scene "objects" obj)
+        (is (= ["Cube" "Lamp" "Extra"]
+               (map #(b/get % "name") (b/coll scene "objects"))))
+        (b/coll-remove! scene "objects" obj)
+        (is (= ["Cube" "Lamp"]
+               (map #(b/get % "name") (b/coll scene "objects"))))))
+    (testing "coll-add! is idempotent"
+      (let [obj (b/id-new "Object" "Dup")]
+        (b/coll-add! scene "objects" obj)
+        (b/coll-add! scene "objects" obj)
+        (is (= 3 (b/coll-count scene "objects")))))))

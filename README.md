@@ -99,6 +99,9 @@ it on the frame. Reentrant calls (from inside a tick-drained op) run inline.
       tick-pump thread
 - [x] Bridge: typed get/set, arrays (fixed + dynamic), enums, pointers,
       collections, introspection — against the mock shim
+- [x] Creation: `id-new` / `mesh-from-pydata!` / `coll-add!` / `coll-remove!`
+      (create meshes, build geometry, link objects into the scene graph) —
+      against the mock shim; the real shim's DNA/BKE code is unverified
 - [x] `--library` build + C harness (init/tick/eval/repl/rebind) — 14 checks
 - [ ] Real shim over RNA (host/upbgejolt_shim.cc) — needs a UPBGE build
 - [ ] Operator layer (`bpy.ops` equivalent: WM_operatortype_find etc.)

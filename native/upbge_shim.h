@@ -116,6 +116,31 @@ ujs_iter_t ujs_coll_iter(ujs_pointer owner, const char *name);
 bool ujs_coll_next(ujs_iter_t it, ujs_pointer *out);
 void ujs_coll_iter_free(ujs_iter_t it);
 
+/* ---- creation / structural mutation ----------------------------------------
+ *
+ * The scene-graph editing surface: create ID datablocks (an Object, a Mesh),
+ * build mesh geometry, and link/unlink collection members. These are the
+ * bpy.data.*.new / Mesh.from_pydata / CollectionObjects.link counterparts.
+ */
+
+/* create a new ID datablock of the given RNA type (e.g. "Object", "Mesh"),
+ * named `name`, and fill *out with its pointer. */
+bool ujs_id_new(const char *type_name, const char *name, ujs_pointer *out);
+
+/* Replace `mesh`'s geometry from vertex positions and polygon indices, like
+ * bpy's Mesh.from_pydata. `verts` holds nverts xyz triples. `face_offsets`
+ * (nfaces+1 int32) are prefix offsets into `face_indices`; polygon i runs
+ * [face_offsets[i], face_offsets[i+1]). */
+bool ujs_mesh_from_pydata(ujs_pointer mesh,
+                          const double *verts, int32_t nverts,
+                          const int32_t *face_offsets, int32_t nfaces,
+                          const int32_t *face_indices, int32_t nindices);
+
+/* link/unlink `member` in collection property `name` on `coll` (e.g. the
+ * Scene.objects collection). */
+bool ujs_coll_add(ujs_pointer coll, const char *name, ujs_pointer member);
+bool ujs_coll_remove(ujs_pointer coll, const char *name, ujs_pointer member);
+
 /* ---- test-only hooks (mock shim; never called against a real host) ---- */
 
 void ujs_test_reset(void);

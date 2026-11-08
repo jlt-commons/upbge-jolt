@@ -60,3 +60,37 @@
   [obj dxyz]
   (let [cur (pos obj)]
     (put! obj :location (mapv + cur dxyz))))
+
+(defn add-mesh!
+  "Create a mesh named `name` from vertex positions (a seq of [x y z]
+  triples) and faces (a seq of vertex-index seqs); returns the mesh."
+  [name verts faces]
+  (let [mesh (b/id-new "Mesh" name)]
+    (b/mesh-from-pydata! mesh verts faces)
+    mesh))
+
+(defn add-object!
+  "Create an object named `name` carrying `data` (a mesh pointer, or nil);
+  returns the object."
+  [name data]
+  (let [obj (b/id-new "Object" name)]
+    (when data (b/set! obj "data" data))
+    obj))
+
+(defn link!
+  "Link `obj` into the scene's objects collection; returns it."
+  [obj]
+  (b/coll-add! (scene) "objects" obj)
+  obj)
+
+(defn unlink!
+  "Unlink `obj` from the scene's objects collection; returns it."
+  [obj]
+  (b/coll-remove! (scene) "objects" obj)
+  obj)
+
+(defn add!
+  "Create a mesh object and link it into the scene in one step. Returns the
+  object."
+  [name verts faces]
+  (link! (add-object! name (add-mesh! (str name "-mesh") verts faces))))

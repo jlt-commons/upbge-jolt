@@ -51,6 +51,12 @@
 (ffi/defcfn ujs-coll-next "ujs_coll_next" [:int64 :pointer] :bool)
 (ffi/defcfn ujs-coll-iter-free "ujs_coll_iter_free" [:int64] :void)
 
+(ffi/defcfn ujs-id-new "ujs_id_new" [:string :string :pointer] :bool)
+(ffi/defcfn ujs-mesh-from-pydata "ujs_mesh_from_pydata"
+  [:pointer :pointer :int32 :pointer :int32 :pointer :int32] :bool)
+(ffi/defcfn ujs-coll-add "ujs_coll_add" [:pointer :string :pointer] :bool)
+(ffi/defcfn ujs-coll-remove "ujs_coll_remove" [:pointer :string :pointer] :bool)
+
 ;; --- pointer marshalling --------------------------------------------------------
 
 (defn- host-error
@@ -373,8 +379,80 @@
        (let [it (ujs-coll-iter buf name)]
          (if (zero? it)
            []
-           (loop [acc []]
-             (let [[m more?] (coll-step it)]
-               (if more?
-                 (recur (if m (conj acc m) acc))
-                 (do (ujs-coll-iter-free it) acc))))))))))
+            (loop [acc []]
+              (let [[m more?] (coll-step it)]
+                (if more?
+                  (recur (if m (conj acc m) acc))
+                  (do (ujs-coll-iter-free it) acc))))))))))
+
+;; --- creation / structural mutation -------------------------------------------
+
+(defn id-new
+  "Create a new ID datablock of `type` (e.g. \"Object\", \"Mesh\"), named
+  `name`. Returns the pointer map."
+  [type name]
+  (core/marshal
+   (fn []
+     (let [out (ffi/alloc ptr-size)]
+       (try
+         (if (ujs-id-new type name out)
+           (read-ptr! out)
+           (host-error name))
+         (finally (ffi/free out)))))))
+
+(defn- face-encoding
+  "A seq of face index-seqs -> [offsets indices], as flat int32 vectors.
+  offsets has (count faces)+1 prefix sums into indices."
+  [faces]
+  (let [faces   (mapv vec faces)
+        offsets (loop [i 0 acc [0]]
+                  (if (= i (count faces))
+                    (vec acc)
+                    (recur (inc i) (conj acc (+ (peek acc) (count (nth faces i)))))))
+        indices (vec (apply concat faces))]
+    [offsets indices]))
+
+(defn mesh-from-pydata!
+  "Build `mesh` geometry from `verts` (a seq of [x y z] triples) and `faces`
+  (a seq of vertex-index seqs), like bpy's Mesh.from_pydata. Returns the mesh."
+  [mesh verts faces]
+  (core/marshal
+   (fn []
+     (let [verts        (mapv (fn [xyz] (mapv double xyz)) verts)
+           nverts       (count verts)
+           [offsets indices] (face-encoding faces)
+           vbuf         (ffi/alloc (* 8 nverts 3))
+           obuf         (ffi/alloc (* 4 (count offsets)))
+           ibuf         (ffi/alloc (* 4 (count indices)))]
+       (try
+         (doseq [[i xyz] (map-indexed vector verts)
+                 [j c]  (map-indexed vector xyz)]
+           (ffi/write vbuf :double c (* 8 (+ (* i 3) j))))
+         (doseq [[i o] (map-indexed vector offsets)]
+           (ffi/write obuf :int32 o (* 4 i)))
+         (doseq [[i idx] (map-indexed vector indices)]
+           (ffi/write ibuf :int32 idx (* 4 i)))
+         (with-ptr buf mesh
+           (or (ujs-mesh-from-pydata buf vbuf nverts obuf (count faces) ibuf (count indices))
+               (host-error "vertices")))
+         mesh
+         (finally (ffi/free vbuf) (ffi/free obuf) (ffi/free ibuf)))))))
+
+(defn coll-add!
+  "Link `member` into collection `name` on `coll` (e.g. the scene's
+  \"objects\"). Idempotent."
+  [coll name member]
+  (core/marshal
+   (fn []
+     (with-ptr cbuf coll
+       (with-ptr mbuf member
+         (or (ujs-coll-add cbuf name mbuf) (host-error name)))))))
+
+(defn coll-remove!
+  "Unlink `member` from collection `name` on `coll`. No-op when absent."
+  [coll name member]
+  (core/marshal
+   (fn []
+     (with-ptr cbuf coll
+       (with-ptr mbuf member
+         (or (ujs-coll-remove cbuf name mbuf) (host-error name)))))))

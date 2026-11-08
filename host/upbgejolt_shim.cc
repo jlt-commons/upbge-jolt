@@ -28,6 +28,19 @@
 #include "RNA_access.hh"
 #include "RNA_types.hh"
 
+#include "DNA_collection_types.h"
+#include "DNA_mesh_types.h"
+#include "DNA_meshdata_types.h"
+#include "DNA_object_types.h"
+#include "DNA_scene_types.h"
+
+#include "BKE_collection.h"
+#include "BKE_global.h"
+#include "BKE_lib_id.h"
+#include "BKE_mesh.h"
+
+#include "BLI_math_vector.h"
+
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -453,6 +466,108 @@ extern "C" void ujs_coll_iter_free(ujs_iter_t h)
   if (it == nullptr) return;
   RNA_property_collection_end(&it->rna);
   free(it);
+}
+
+/* ---- creation / structural mutation ------------------------------------------
+ *
+ * Scene-graph editing over the DNA/BKE layer. These are unverified until a
+ * UPBGE build is available; the API surface is the stable Blender 2.8x-3.x
+ * one, but the exact BKE_mesh_* signatures and the mesh data layout should be
+ * checked against the target UPBGE tree before relying on them.
+ */
+
+extern "C" bool ujs_id_new(const char *type_name, const char *name, ujs_pointer *out)
+{
+  short idcode = BKE_idtype_idcode_from_name(type_name);
+  if (idcode == 0) {
+    set_err("unknown id type: %s", type_name);
+    return false;
+  }
+  ID *id = BKE_id_new(G_MAIN, idcode, name);
+  if (id == nullptr) {
+    set_err("failed to create id: %s", name);
+    return false;
+  }
+  *out = as_ujs(RNA_id_pointer_create(id));
+  return true;
+}
+
+extern "C" bool ujs_mesh_from_pydata(ujs_pointer mesh,
+                                     const double *verts, int32_t nverts,
+                                     const int32_t *face_offsets, int32_t nfaces,
+                                     const int32_t *face_indices, int32_t nindices)
+{
+  PointerRNA ptr = as_rna(mesh);
+  if (ptr.type == nullptr || ptr.data == nullptr) {
+    set_err("invalid mesh");
+    return false;
+  }
+  if (nfaces > 0 &&
+      (face_offsets[0] != 0 || face_offsets[nfaces] != nindices)) {
+    set_err("bad face offsets");
+    return false;
+  }
+  for (int i = 0; i < nindices; i++) {
+    if (face_indices[i] < 0 || face_indices[i] >= nverts) {
+      set_err("face index out of range");
+      return false;
+    }
+  }
+
+  Mesh *dst = static_cast<Mesh *>(ptr.data);
+  Mesh *me = BKE_mesh_new_nomain(nverts, 0, nindices, nfaces);
+  for (int i = 0; i < nverts; i++) {
+    copy_v3fl_v3db(me->mvert[i].co, &verts[i * 3]);
+  }
+  int li = 0;
+  for (int f = 0; f < nfaces; f++) {
+    MPoly *mp = &me->mpoly[f];
+    mp->loopstart = face_offsets[f];
+    mp->totloop = face_offsets[f + 1] - face_offsets[f];
+    for (int j = mp->loopstart; j < mp->loopstart + mp->totloop; j++, li++) {
+      me->mloop[j].v = face_indices[li];
+    }
+  }
+  BKE_mesh_nomain_to_mesh(me, dst, &CD_MASK_MESH, &CD_MASK_MESH);
+  return true;
+}
+
+/* resolve the collection a collection property names. The mock and the scene
+ * graph agree on "objects" being Scene.objects (the master collection's
+ * linked objects). */
+static Collection *coll_of(ujs_pointer coll, const char *name)
+{
+  PointerRNA ptr = as_rna(coll);
+  if (ptr.type == nullptr || ptr.data == nullptr) return nullptr;
+  if (strcmp(name, "objects") == 0 &&
+      RNA_struct_is_a(ptr.type, &RNA_Scene)) {
+    return static_cast<Scene *>(ptr.data)->master_collection;
+  }
+  return nullptr;
+}
+
+extern "C" bool ujs_coll_add(ujs_pointer coll, const char *name, ujs_pointer member)
+{
+  Collection *col = coll_of(coll, name);
+  PointerRNA mptr = as_rna(member);
+  if (col == nullptr || mptr.data == nullptr) {
+    set_err("not a collection property");
+    return false;
+  }
+  BKE_collection_object_add(G_MAIN, col, static_cast<Object *>(mptr.data));
+  return true;
+}
+
+extern "C" bool ujs_coll_remove(ujs_pointer coll, const char *name, ujs_pointer member)
+{
+  Collection *col = coll_of(coll, name);
+  PointerRNA mptr = as_rna(member);
+  if (col == nullptr || mptr.data == nullptr) {
+    set_err("not a collection property");
+    return false;
+  }
+  BKE_collection_object_remove(G_MAIN, col, static_cast<Object *>(mptr.data), false);
+  return true;
 }
 
 /* ---- root -------------------------------------------------------------------------- */
