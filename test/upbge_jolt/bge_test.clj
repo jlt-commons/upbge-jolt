@@ -26,3 +26,8 @@
     (testing "move! round-trips"
       (bge/move! cube [9 8 7])
       (is (= [9.0 8.0 7.0] (bge/position cube))))))
+
+(deftest filter-type-validation
+  (testing "an unknown filter type is rejected before reaching the engine"
+    (is (thrown-with-msg? Exception #"unknown filter type"
+          (bge/add-filter! 0 :glow)))))

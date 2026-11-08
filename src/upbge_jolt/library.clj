@@ -15,6 +15,7 @@
             [upbge-jolt.bpy]        ; and the ergonomic REPL layer
             [upbge-jolt.bge]        ; and the game-engine (KX) layer
             [upbge-jolt.game :as game] ; game sessions, per-frame logic, main.clj
+            [upbge-jolt.audio]      ; procedural/file audio
             [jolt.nrepl]            ; static so --library bakes it in
             [jolt.ffi :as ffi]))
 

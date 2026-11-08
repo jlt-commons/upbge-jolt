@@ -218,3 +218,26 @@
   "[width height] in pixels."
   []
   (b/kx-canvas-size))
+
+;; --- text and post-processing ------------------------------------------------
+
+(defn text!
+  "Set the string a game text object shows (HUD labels, instrument
+  readouts; parent text objects to the camera to keep them on screen)."
+  [obj s]
+  (b/kx-set-text! obj s))
+
+(defn add-filter!
+  "Add 2D filter pass `index`: a built-in type (:blur :sharpen :grayscale
+  :sepia :invert :sobel :prewitt :laplacian :dilation :erosion
+  :motion-blur) or :custom with a GLSL fragment program reading
+  bgl_RenderedTexture."
+  ([index type] (b/kx-add-filter! index type))
+  ([index type glsl] (b/kx-add-filter! index type glsl)))
+
+(defn remove-filter! [index] (b/kx-remove-filter! index))
+
+(defn filter-uniform!
+  "Set a float uniform (1-4 components) on a custom filter pass."
+  [index name v]
+  (b/kx-filter-uniform! index name v))

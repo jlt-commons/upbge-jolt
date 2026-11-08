@@ -810,3 +810,67 @@ bool ujs_kx_set_vec(ujs_pointer obj, const char *what, const double *v) {
   o->pos[0] = v[0]; o->pos[1] = v[1]; o->pos[2] = v[2];
   return true;
 }
+
+/* --- audio (round 4): the mock tracks sounds and handles, plays nothing ---- */
+
+typedef struct { char kind[32]; double freq; } mock_sound;
+typedef struct { double pitch, volume; int loop; bool stopped; } mock_handle;
+
+void *ujs_snd_tone(const char *wave, double frequency, double rate) {
+  (void)rate;
+  const char *ok[] = {"sine", "sawtooth", "square", "triangle"};
+  for (int i = 0; i < 4; i++)
+    if (strcmp(wave, ok[i]) == 0) {
+      mock_sound *s = calloc(1, sizeof *s);
+      snprintf(s->kind, sizeof s->kind, "%s", wave);
+      s->freq = frequency;
+      return s;
+    }
+  char msg[128];
+  snprintf(msg, sizeof msg, "unknown wave %s (sine, sawtooth, square, triangle)", wave);
+  set_err(msg);
+  return NULL;
+}
+
+void *ujs_snd_noise(double seconds, double rate) {
+  if (seconds * rate <= 0) { set_err("noise length must be positive"); return NULL; }
+  mock_sound *s = calloc(1, sizeof *s);
+  snprintf(s->kind, sizeof s->kind, "noise");
+  return s;
+}
+
+void *ujs_snd_filter(void *sound, const char *kind, double a, double b) {
+  (void)a; (void)b;
+  if (!sound) { set_err("null sound"); return NULL; }
+  mock_sound *s = calloc(1, sizeof *s);
+  snprintf(s->kind, sizeof s->kind, "%s", kind);
+  return s;
+}
+
+void ujs_snd_free(void *sound) { free(sound); }
+
+void *ujs_snd_play(void *sound, int32_t loop) {
+  if (!sound) { set_err("null sound"); return NULL; }
+  mock_handle *h = calloc(1, sizeof *h);
+  h->pitch = 1; h->volume = 1; h->loop = loop;
+  return h;
+}
+
+bool ujs_snd_control(void *handle, const char *what, double value) {
+  mock_handle *h = handle;
+  if (!h) { set_err("null handle"); return false; }
+  if (h->stopped) { set_err("handle stopped"); return false; }
+  if (strcmp(what, "pitch") == 0) h->pitch = value;
+  else if (strcmp(what, "volume") == 0) h->volume = value;
+  else if (strcmp(what, "stop") == 0) h->stopped = true;
+  else if (strcmp(what, "pause") != 0 && strcmp(what, "resume") != 0) { set_err("unknown control"); return false; }
+  return true;
+}
+
+void ujs_snd_handle_free(void *handle) { free(handle); }
+
+/* test hook: a handle's [pitch volume loop] */
+void ujs_test_handle_state(void *handle, double *out3) {
+  mock_handle *h = handle;
+  out3[0] = h->pitch; out3[1] = h->volume; out3[2] = h->loop;
+}

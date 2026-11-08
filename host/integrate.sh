@@ -46,7 +46,11 @@ set(INC
   ../../gameengine/Rasterizer
   ../../gameengine/Rasterizer/RAS_OpenGLRasterizer
   ../../gameengine/SceneGraph
+  ../draw/intern
+  ../gpu
+  ../gpu/intern
   ../../../intern/guardedalloc
+  ../../../intern/termcolor
   ${PYTHON_INCLUDE_DIR}
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
 )
@@ -61,6 +65,7 @@ set(LIB
   PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
   PRIVATE bf::dna
+  PRIVATE bf::gpu
   bf_python
   bf_rna
   bf_windowmanager
@@ -81,6 +86,7 @@ if(WITH_BULLET)
 endif()
 if(WITH_AUDASPACE)
   list(APPEND INC_SYS ${AUDASPACE_C_INCLUDE_DIRS})
+  list(APPEND LIB ${AUDASPACE_C_LIBRARIES})
   add_definitions(-DWITH_AUDASPACE)
 endif()
 if(WITH_SDL)
@@ -178,6 +184,20 @@ if old not in src:
 src = src.replace(old, old + "  uj_shim_set_in_game(false); /* upbge-jolt: KX scenes die below */\n", 1)
 src = src.replace('extern "C" int uj_host_game_tick();',
                   'extern "C" int uj_host_game_tick();\nextern "C" void uj_shim_set_in_game(bool in_game);', 1)
+open(path, "w").write(src)
+PY
+
+# --- 2D filters: the fullscreen vertex shader reads gl_VertexID, which the
+# Metal backend only provides when the create-info asks for it ---------------
+RSH="$UPBGE/source/gameengine/Rasterizer/RAS_Shader.cpp"
+grep -q "upbge-jolt: VERTEX_ID" "$RSH" || python3 - "$RSH" <<'PY'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old = '  info.fragment_out(0, Type::float4_t, "fragColor");\n'
+if old not in src:
+    sys.exit("integrate.sh: fragment_out not found in " + path)
+src = src.replace(old, old + "  info.builtins(BuiltinBits::VERTEX_ID); /* upbge-jolt: VERTEX_ID for Metal */\n", 1)
 open(path, "w").write(src)
 PY
 

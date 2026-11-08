@@ -215,6 +215,13 @@ it on the frame. Reentrant calls (from inside a tick-drained op) run inline.
       one-command play — verified across repeated start/stop cycles
 - [x] KX runtime: transforms, physics, raycasts, hierarchy, spawning,
       cameras, input, mouse, screenshots — verified in the running game
+- [x] Audio (upbge-jolt.audio): tones, noise, files, low/high-pass, mix,
+      looping playback with per-frame pitch/volume on Blender's device
+- [x] Game text objects (`bge/text!`) for HUDs and instruments
+- [ ] 2D filters (`bge/add-filter!`): compile on Metal after the VERTEX_ID
+      engine fix, but render wrong (white/black) and custom GLSL fails Metal
+      translation; use EEVEE's TAA, ray tracing, fast GI, shadows,
+      volumetrics and AgX/Filmic view transforms (all over RNA) meanwhile
 - unchecked box = in progress or planned
 
 ## License

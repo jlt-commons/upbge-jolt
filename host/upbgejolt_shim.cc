@@ -66,6 +66,26 @@
 #include "KX_Globals.h"
 #include "KX_Scene.h"
 #include "KX_Camera.h"
+#include "KX_FontObject.h"
+#include "RAS_2DFilter.h"
+#include "RAS_2DFilterManager.h"
+#include "RAS_Shader.h"
+#include "BKE_sound.hh"
+
+#include "Exception.h"
+#include "devices/IHandle.h"
+#include "devices/IDevice.h"
+#include "file/File.h"
+#include "fx/Highpass.h"
+#include "fx/Lowpass.h"
+#include "fx/Volume.h"
+#include "generator/Sawtooth.h"
+#include "generator/Sine.h"
+#include "generator/Square.h"
+#include "generator/Triangle.h"
+#include "sequence/Superpose.h"
+#include "util/Buffer.h"
+#include "util/StreamBuffer.h"
 #include "KX_ClientObjectInfo.h"
 #include "KX_KetsjiEngine.h"
 #include "KX_RayCast.h"
@@ -1232,6 +1252,257 @@ extern "C" bool ujs_kx_canvas_size(int32_t *w, int32_t *h)
   *w = canvas->GetWidth();
   *h = canvas->GetHeight();
   return true;
+}
+
+/* ---- media and overlays (round 4) --------------------------------------------- */
+
+extern "C" bool ujs_kx_set_text(ujs_pointer obj, const char *text)
+{
+  KX_GameObject *o = kx_obj(obj);
+  if (o == nullptr) return false;
+  KX_FontObject *font = dynamic_cast<KX_FontObject *>(o);
+  if (font == nullptr) {
+    set_err("%s is not a text object", o->GetName().c_str());
+    return false;
+  }
+  font->SetText(text ? text : "");
+  return true;
+}
+
+static RAS_2DFilterManager *kx_filters()
+{
+  KX_Scene *scene = kx_scene();
+  if (scene == nullptr) {
+    set_err("no game running");
+    return nullptr;
+  }
+  return scene->Get2DFilterManager();
+}
+
+extern "C" bool ujs_kx_add_filter(int32_t index, int32_t type, const char *glsl)
+{
+  RAS_2DFilterManager *fm = kx_filters();
+  if (fm == nullptr) return false;
+  if (fm->GetFilterPass(index)) {
+    set_err("a filter already uses pass %d", index);
+    return false;
+  }
+  if (type < RAS_2DFilterManager::FILTER_BLUR || type > RAS_2DFilterManager::FILTER_CUSTOMFILTER) {
+    set_err("invalid filter type %d", type);
+    return false;
+  }
+  RAS_2DFilterData data;
+  data.filterPassIndex = index;
+  data.filterMode = type;
+  data.shaderText = glsl ? std::string(glsl) : std::string();
+  RAS_2DFilter *f = fm->AddFilter(data);
+  if (f == nullptr || !f->Ok()) {
+    fm->RemoveFilterPass(index);
+    set_err("filter %d failed to compile (GLSL error, see the console)", index);
+    return false;
+  }
+  return true;
+}
+
+extern "C" bool ujs_kx_remove_filter(int32_t index)
+{
+  RAS_2DFilterManager *fm = kx_filters();
+  if (fm == nullptr) return false;
+  fm->RemoveFilterPass(index);
+  return true;
+}
+
+extern "C" bool ujs_kx_filter_uniform(int32_t index, const char *name, const double *v, int32_t n)
+{
+  RAS_2DFilterManager *fm = kx_filters();
+  if (fm == nullptr) return false;
+  RAS_2DFilter *f = fm->GetFilterPass(index);
+  if (f == nullptr || !f->Ok()) {
+    set_err("no working filter in pass %d", index);
+    return false;
+  }
+  if (n < 1 || n > 4) {
+    set_err("uniform %s: 1-4 floats, got %d", name, n);
+    return false;
+  }
+  int loc = f->GetUniformLocation(name, false);
+  if (loc == -1) {
+    set_err("filter %d has no uniform %s (unused uniforms are optimized out)", index, name);
+    return false;
+  }
+  float fv[4];
+  for (int i = 0; i < n; i++) fv[i] = (float)v[i];
+  static const int types[] = {RAS_Shader::RAS_Uniform::UNI_FLOAT, RAS_Shader::RAS_Uniform::UNI_FLOAT2,
+                              RAS_Shader::RAS_Uniform::UNI_FLOAT3, RAS_Shader::RAS_Uniform::UNI_FLOAT4};
+  f->SetUniformfv(loc, types[n - 1], fv, sizeof(float) * n, 1);
+  return true;
+}
+
+/* Audio over audaspace's C++ API (Blender builds it without the C
+ * bindings). Sounds and handles cross as heap shared_ptrs, freed by
+ * ujs_snd_free / ujs_snd_handle_free. Playback goes to Blender's device. */
+
+using UjsSound = std::shared_ptr<aud::ISound>;
+using UjsHandle = std::shared_ptr<aud::IHandle>;
+
+static void *snd_new(aud::ISound *raw)
+{
+  return new UjsSound(raw);
+}
+
+static UjsSound *snd(void *p)
+{
+  if (p == nullptr) set_err("null sound");
+  return static_cast<UjsSound *>(p);
+}
+
+extern "C" void *ujs_snd_tone(const char *wave, double frequency, double rate)
+{
+  try {
+    if (strcmp(wave, "sine") == 0) return snd_new(new aud::Sine((float)frequency, rate));
+    if (strcmp(wave, "sawtooth") == 0) return snd_new(new aud::Sawtooth((float)frequency, rate));
+    if (strcmp(wave, "square") == 0) return snd_new(new aud::Square((float)frequency, rate));
+    if (strcmp(wave, "triangle") == 0) return snd_new(new aud::Triangle((float)frequency, rate));
+  }
+  catch (aud::Exception &e) {
+    set_err("tone: %s", e.getMessage().c_str());
+    return nullptr;
+  }
+  set_err("unknown wave %s (sine, sawtooth, square, triangle)", wave);
+  return nullptr;
+}
+
+extern "C" void *ujs_snd_noise(double seconds, double rate)
+{
+  int n = (int)(seconds * rate);
+  if (n <= 0) {
+    set_err("noise length must be positive");
+    return nullptr;
+  }
+  auto buffer = std::make_shared<aud::Buffer>(n * (int)sizeof(aud::sample_t));
+  aud::sample_t *data = buffer->getBuffer();
+  uint32_t x = 2463534242u; /* xorshift: fast, repeatable */
+  for (int i = 0; i < n; i++) {
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    data[i] = (aud::sample_t)((x / 4294967295.0) * 2.0 - 1.0);
+  }
+  aud::Specs specs;
+  specs.rate = rate;
+  specs.channels = aud::CHANNELS_MONO;
+  try {
+    return snd_new(new aud::StreamBuffer(buffer, specs));
+  }
+  catch (aud::Exception &e) {
+    set_err("noise: %s", e.getMessage().c_str());
+    return nullptr;
+  }
+}
+
+extern "C" void *ujs_snd_file(const char *path)
+{
+  try {
+    return snd_new(new aud::File(path));
+  }
+  catch (aud::Exception &e) {
+    set_err("file %s: %s", path, e.getMessage().c_str());
+    return nullptr;
+  }
+}
+
+/* kind: "lowpass" "highpass" (a = frequency, b = Q), "volume" (a) */
+extern "C" void *ujs_snd_filter(void *sound, const char *kind, double a, double b)
+{
+  UjsSound *s = snd(sound);
+  if (s == nullptr) return nullptr;
+  try {
+    if (strcmp(kind, "lowpass") == 0) return snd_new(new aud::Lowpass(*s, (float)a, (float)b));
+    if (strcmp(kind, "highpass") == 0) return snd_new(new aud::Highpass(*s, (float)a, (float)b));
+    if (strcmp(kind, "volume") == 0) return snd_new(new aud::Volume(*s, (float)a));
+  }
+  catch (aud::Exception &e) {
+    set_err("%s: %s", kind, e.getMessage().c_str());
+    return nullptr;
+  }
+  set_err("unknown filter %s (lowpass, highpass, volume)", kind);
+  return nullptr;
+}
+
+extern "C" void *ujs_snd_mix(void *a, void *b)
+{
+  UjsSound *x = snd(a), *y = snd(b);
+  if (x == nullptr || y == nullptr) return nullptr;
+  try {
+    return snd_new(new aud::Superpose(*x, *y));
+  }
+  catch (aud::Exception &e) {
+    set_err("mix: %s", e.getMessage().c_str());
+    return nullptr;
+  }
+}
+
+extern "C" void ujs_snd_free(void *sound)
+{
+  delete static_cast<UjsSound *>(sound);
+}
+
+/* play on Blender's device; loop = -1 loops forever */
+extern "C" void *ujs_snd_play(void *sound, int32_t loop)
+{
+  UjsSound *s = snd(sound);
+  if (s == nullptr) return nullptr;
+  /* Blender opens its device on demand; hold one use for the session */
+  static bool in_use = false;
+  if (!in_use) {
+    BKE_sound_use_begin();
+    in_use = true;
+  }
+  AUD_Device device = BKE_sound_get_device();
+  if (!device) {
+    set_err("no audio device (sound disabled in preferences?)");
+    return nullptr;
+  }
+  try {
+    UjsHandle h = device->play(*s, true);
+    if (!h) {
+      set_err("device refused to play");
+      return nullptr;
+    }
+    h->setLoopCount(loop);
+    return new UjsHandle(h);
+  }
+  catch (aud::Exception &e) {
+    set_err("play: %s", e.getMessage().c_str());
+    return nullptr;
+  }
+}
+
+/* what: "pitch" "volume"; or "stop" "pause" "resume" (value ignored) */
+extern "C" bool ujs_snd_control(void *handle, const char *what, double value)
+{
+  if (handle == nullptr) {
+    set_err("null handle");
+    return false;
+  }
+  UjsHandle &h = *static_cast<UjsHandle *>(handle);
+  bool ok;
+  if (strcmp(what, "pitch") == 0) ok = h->setPitch((float)value);
+  else if (strcmp(what, "volume") == 0) ok = h->setVolume((float)value);
+  else if (strcmp(what, "stop") == 0) ok = h->stop();
+  else if (strcmp(what, "pause") == 0) ok = h->pause();
+  else if (strcmp(what, "resume") == 0) ok = h->resume();
+  else {
+    set_err("unknown control %s", what);
+    return false;
+  }
+  if (!ok) set_err("%s failed (handle stopped?)", what);
+  return ok;
+}
+
+extern "C" void ujs_snd_handle_free(void *handle)
+{
+  delete static_cast<UjsHandle *>(handle);
 }
 
 /* ---- roots ------------------------------------------------------------------------- */

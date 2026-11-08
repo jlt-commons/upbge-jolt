@@ -304,6 +304,29 @@ bool ujs_kx_screenshot(const char *path);
 bool ujs_kx_frame_info(double *out3);
 bool ujs_kx_canvas_size(int32_t *w, int32_t *h);
 
+/* ---- media and overlays (round 4) ------------------------------------------
+ *
+ * Text: set the string a game text object shows (HUD labels, instruments).
+ * Filters: 2D post-process passes on the running scene (bge filterManager);
+ * `type` is a RAS_2DFilterManager FILTER_* mode, 12 = custom GLSL.
+ * Audio: sounds and handles are opaque heap objects, freed with
+ * ujs_snd_free / ujs_snd_handle_free; playback goes to Blender's device. */
+
+bool ujs_kx_set_text(ujs_pointer obj, const char *text);
+bool ujs_kx_add_filter(int32_t index, int32_t type, const char *glsl);
+bool ujs_kx_remove_filter(int32_t index);
+bool ujs_kx_filter_uniform(int32_t index, const char *name, const double *v, int32_t n);
+
+void *ujs_snd_tone(const char *wave, double frequency, double rate); /* sine sawtooth square triangle */
+void *ujs_snd_noise(double seconds, double rate);
+void *ujs_snd_file(const char *path);
+void *ujs_snd_filter(void *sound, const char *kind, double a, double b); /* lowpass highpass volume */
+void *ujs_snd_mix(void *a, void *b);
+void ujs_snd_free(void *sound);
+void *ujs_snd_play(void *sound, int32_t loop); /* loop -1 = forever */
+bool ujs_snd_control(void *handle, const char *what, double value); /* pitch volume stop pause resume */
+void ujs_snd_handle_free(void *handle);
+
 #ifdef __cplusplus
 }
 #endif

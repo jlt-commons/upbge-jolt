@@ -1069,3 +1069,39 @@
    (let [w (ffi/alloc 4) h (ffi/alloc 4)]
      (try (if (ujs-kx-canvas-size w h) [(ffi/read w :int32) (ffi/read h :int32)] (host-error "canvas"))
           (finally (ffi/free w) (ffi/free h))))))
+
+;; --- text objects and 2D filters --------------------------------------------
+
+(ffi/defcfn ujs-kx-set-text "ujs_kx_set_text" [:pointer :string] :bool)
+(ffi/defcfn ujs-kx-add-filter "ujs_kx_add_filter" [:int32 :int32 :string] :bool)
+(ffi/defcfn ujs-kx-remove-filter "ujs_kx_remove_filter" [:int32] :bool)
+(ffi/defcfn ujs-kx-filter-uniform "ujs_kx_filter_uniform" [:int32 :string :pointer :int32] :bool)
+
+(defn kx-set-text!
+  "Set the string a game text object shows."
+  [obj text]
+  (on-host (with-ptr buf obj (or (ujs-kx-set-text buf (str text)) (host-error "text")))))
+
+(def ^:private filter-types
+  {:motion-blur 1 :blur 2 :sharpen 3 :dilation 4 :erosion 5 :laplacian 6
+   :sobel 7 :prewitt 8 :grayscale 9 :sepia 10 :invert 11 :custom 12})
+
+(defn kx-add-filter!
+  "Add 2D filter pass `index` of `type` (a keyword from filter-types, or
+  :custom with a GLSL fragment program)."
+  ([index type] (kx-add-filter! index type nil))
+  ([index type glsl]
+   (let [t (or (filter-types type) (throw (ex-info "unknown filter type" {:type type})))]
+     (on-host (or (ujs-kx-add-filter (int index) (int t) (or glsl "")) (host-error "filter"))))))
+
+(defn kx-remove-filter! [index]
+  (on-host (or (ujs-kx-remove-filter (int index)) (host-error "filter"))))
+
+(defn kx-filter-uniform!
+  "Set float uniform `name` (1-4 components) on filter pass `index`."
+  [index name v]
+  (let [xs (if (sequential? v) v [v])]
+    (on-host
+     (let [b (doubles-in xs (count xs))]
+       (try (or (ujs-kx-filter-uniform (int index) name b (count xs)) (host-error name))
+            (finally (free-doubles b)))))))
