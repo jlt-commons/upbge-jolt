@@ -1,0 +1,47 @@
+{;; upbge-jolt embeds a jolt runtime (REPL + bridge) inside a UPBGE/Blender
+ ;; host process. The host side is a small C shim (native/) exposing a flat C
+ ;; ABI over RNA and the game engine; this project builds that runtime as a
+ ;; --library shared object the host dlopens.
+ ;;
+ ;; nREPL streaming (out/err per flush) and :collect-safe exports need the
+ ;; 0.8.13 floor; the nrepl middleware dep wants >= 0.8.24-era jolt.nrepl/start
+ ;; with the :port-file opts.
+ :jolt/min-version "0.8.13"
+
+ :paths ["src"]
+
+ :deps {jolt-lang/nrepl {:git/url "https://github.com/jolt-lang/nrepl"
+                         :git/tag "v0.4.1" :git/sha "51c2572"}}
+
+ ;; native/upbge_shim.c is compiled against the host UPBGE build. The dylib
+ ;; ships beside the source, path-qualified so it loads relative to this
+ ;; project, not to wherever the host app runs from. Optional: the core
+ ;; runtime (queue/marshal/nREPL) is testable without it; the bridge
+ ;; namespaces require it.
+ :jolt/native [{:name "upbge"
+                :darwin ["native/libupbge_shim.dylib"]
+                :linux  ["native/libupbge_shim.so"]
+                :optional true}]
+
+ :aliases {:test {:extra-paths ["test"]
+                  :main-opts   ["-m" "upbge-jolt.test-runner"]}}
+
+ :tasks {:requires ([babashka.fs :as fs])
+         :init (def shlib (str "native/libupbge_shim."
+                               (if (re-find #"^Mac" (System/getProperty "os.name")) "dylib" "so")))
+
+         native
+         {:doc "build the mock host shim dylib (for tests; the real shim needs a UPBGE build)"
+          :task (if (or (not (fs/exists? shlib))
+                        (seq (fs/modified-since shlib ["native/mock_shim.c" "native/upbge_shim.h" "deps.edn"])))
+                  (do (shell "cc" "-O2" "-fPIC" "-shared" "-Inative"
+                             "native/mock_shim.c" "-o" shlib)
+                      (println "built:" shlib))
+                  (println "up to date:" shlib))}
+
+         test {:doc "unit tests (headless, mock shim)" :depends [native] :task (shell "jolt -M:test")}
+
+         lib
+         {:doc "build libjolt_upbge.{dylib,so} via jolt build --library"
+          :task (do (shell "jolt" "build" "--library" "-m" "upbge-jolt.library" "-o" "libjolt_upbge")
+                    (println "built: libjolt_upbge.dylib"))}}}
