@@ -94,6 +94,12 @@ bool ujs_root(ujs_pointer *out);
 /* bpy.data (the Main database) and bpy.context. ujs_root is the context's
  * scene, resolved on every call so it stays valid across file loads. */
 bool ujs_data_root(ujs_pointer *out);
+
+/* The data generation, read in place: bumped whenever loading a file,
+ * undo/redo or a game ending (UPBGE restores the pre-game state) frees the
+ * datablocks RNA pointers point into. Pointers from an older generation must
+ * not be used; the bridge stamps and checks them. */
+const int64_t *ujs_generation_ptr(void);
 bool ujs_context_root(ujs_pointer *out);
 
 /* find property `name` on the pointer's type; fills *out */

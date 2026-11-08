@@ -874,3 +874,9 @@ void ujs_test_handle_state(void *handle, double *out3) {
   mock_handle *h = handle;
   out3[0] = h->pitch; out3[1] = h->volume; out3[2] = h->loop;
 }
+
+/* --- data generation: bumped when RNA pointers are invalidated -------------- */
+
+static int64_t g_generation = 1;
+const int64_t *ujs_generation_ptr(void) { return &g_generation; }
+void ujs_test_bump_generation(void) { g_generation++; }

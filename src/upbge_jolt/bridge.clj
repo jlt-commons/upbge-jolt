@@ -94,10 +94,30 @@
   (throw (ex-info (or (ujs-last-error) "host call failed")
                   (cond-> {} prop (assoc :prop prop)))))
 
+(ffi/defcfn ujs-generation-ptr "ujs_generation_ptr" [] :pointer)
+
+(def ^:private generation-ptr (delay (ujs-generation-ptr)))
+
+(defn- generation
+  "The host's data generation: bumped whenever loading a file, undo/redo or
+  a game ending frees the datablocks RNA pointers point into."
+  []
+  (ffi/read @generation-ptr :int64))
+
+(defn- check-fresh!
+  "Refuse a pointer handed out before the current data generation."
+  [p]
+  (when-let [g (:gen p)]
+    (when (not= g (generation))
+      (throw (ex-info (str "stale pointer: the data it pointed into was replaced (file load, undo, "
+                           "or a game ending); look it up again, e.g. (b/lookup (b/data) \"objects\" name)")
+                      {:pointer p})))))
+
 (defn- write-ptr!
   "Marshal a jolt pointer map into `buf` (24 bytes). nil marshals to a null
-  pointer."
+  pointer. A pointer from an older data generation is refused."
   [buf p]
+  (check-fresh! p)
   (ffi/write buf :int64 (or (:owner p) 0) 0)
   (ffi/write buf :int64 (or (:type p) 0) 8)
   (ffi/write buf :pointer (if (and p (:data p)) (:data p) ffi/null) 16))
@@ -109,7 +129,8 @@
     (when-not (ffi/null? data)
       {:owner (ffi/read buf :int64 0)
        :type  (ffi/read buf :int64 8)
-       :data  data})))
+       :data  data
+       :gen   (generation)})))
 
 (defmacro ^:private with-ptr
   "Bind `sym` to a freshly-marshalled 24-byte ujs_pointer for `p`, freed at
@@ -621,7 +642,8 @@
         (swap! allocs conj sp)
         (put-tag! :string) (ffi/write buf :pointer sp 24))
       (or (nil? v) (map? v))
-      (do (put-tag! :pointer)
+      (do (check-fresh! v)
+          (put-tag! :pointer)
           (ffi/write buf :int64 (or (:owner v) 0) 40)
           (ffi/write buf :int64 (or (:type v) 0) 48)
           (ffi/write buf :pointer (if (:data v) (:data v) ffi/null) 56))
@@ -651,7 +673,8 @@
           (if (ffi/null? s) (ffi/read buf :int64 8) (ffi/ptr->string s)))
       5 (let [data (ffi/read buf :pointer 56)]
           (when-not (ffi/null? data)
-            {:owner (ffi/read buf :int64 40) :type (ffi/read buf :int64 48) :data data})))))
+            {:owner (ffi/read buf :int64 40) :type (ffi/read buf :int64 48) :data data
+             :gen (generation)})))))
 
 (defn- kw-name [k] (if (keyword? k) (clojure.core/name k) (str k)))
 

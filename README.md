@@ -171,6 +171,25 @@ Blender Object behind a game object, so lights, materials and node values can
 be changed through the RNA bridge while the game runs. KX handles are
 validated on every call: a stale one raises instead of touching freed memory.
 
+## Pointers and data generations
+
+RNA pointers point into Blender's datablocks, which are replaced when a file
+loads, on undo/redo, and when a game ends (UPBGE restores the pre-game
+state). The bridge stamps every pointer with the host's data generation and
+refuses one from an older generation with a "stale pointer" error instead of
+reading freed memory: look it up again (`b/lookup`, `bpy/object`). Game-time
+edits to Blender data are undone when the game ends, by the same restore.
+
+## Shaders driven from game logic
+
+`upbge-jolt.nodes` builds node trees; a Value node set every frame from
+`game/on-frame!` feeds game state into shaders at full frame rate. Verified
+in the running game at 60 fps: a time value animating EEVEE vertex
+displacement (`displacement_method` "DISPLACEMENT", the GPU half of a wave
+function whose CPU twin in jolt drives buoyancy), and a moving mask making
+water transparent inside a footprint (`surface_render_method` "DITHERED"),
+the basis for keeping the sea out of a hull.
+
 ## Threading contract
 
 One jolt runtime per process. After `jolt_library_init`, the init thread

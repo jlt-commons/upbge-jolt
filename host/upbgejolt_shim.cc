@@ -51,6 +51,7 @@
 #include "WM_api.hh"
 #include "WM_types.hh"
 
+#include "BKE_callbacks.hh"
 #include "BKE_context.hh"
 #include "MEM_guardedalloc.h"
 #include "BKE_report.hh"
@@ -1532,6 +1533,32 @@ extern "C" bool ujs_root(ujs_pointer *out)
   }
   *out = as_ujs(RNA_id_pointer_create(&scene->id));
   return true;
+}
+
+static int64_t g_generation = 1;
+
+static void bump_generation(Main * /*bmain*/, PointerRNA ** /*ptrs*/, int /*num*/, void * /*arg*/)
+{
+  g_generation++;
+}
+
+extern "C" const int64_t *ujs_generation_ptr(void)
+{
+  static bCallbackFuncStore stores[] = {
+      {nullptr, nullptr, bump_generation, nullptr, 0},
+      {nullptr, nullptr, bump_generation, nullptr, 0},
+      {nullptr, nullptr, bump_generation, nullptr, 0},
+      {nullptr, nullptr, bump_generation, nullptr, 0},
+  };
+  static bool registered = false;
+  if (!registered) {
+    BKE_callback_add(&stores[0], BKE_CB_EVT_LOAD_POST);
+    BKE_callback_add(&stores[1], BKE_CB_EVT_UNDO_POST);
+    BKE_callback_add(&stores[2], BKE_CB_EVT_REDO_POST);
+    BKE_callback_add(&stores[3], BKE_CB_EVT_GAME_POST);
+    registered = true;
+  }
+  return &g_generation;
 }
 
 extern "C" bool ujs_data_root(ujs_pointer *out)

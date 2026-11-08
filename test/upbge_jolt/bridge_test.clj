@@ -2,6 +2,7 @@
   "Property/collection marshalling against the mock host shim
   (native/mock_shim.c, loaded as native/libupbge_shim.dylib)."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [jolt.ffi :as ffi]
             [upbge-jolt.bridge :as b]
             [upbge-jolt.tick-pump :as pump]))
 
@@ -248,3 +249,15 @@
   (testing "an unknown identifier is reported"
     (is (thrown-with-msg? Exception #"no enum item NOPE"
           (b/set! (cube) "mode" "NOPE")))))
+
+(ffi/defcfn bump-generation! "ujs_test_bump_generation" [] :void)
+
+(deftest stale-pointers
+  (testing "a pointer from before a file load / undo / game run is refused"
+    (let [cube (b/lookup (b/root) "objects" "Cube")]
+      (is (= "Cube" (b/get cube "name")))
+      (bump-generation!)
+      (is (thrown-with-msg? Exception #"stale pointer"
+            (b/get cube "name")))
+      (testing "looking it up again works"
+        (is (= "Cube" (b/get (b/lookup (b/root) "objects" "Cube") "name")))))))
