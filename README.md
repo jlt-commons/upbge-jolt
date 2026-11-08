@@ -131,7 +131,10 @@ UPBGE_JOLT_LIB=$PWD/libjolt_upbge.dylib \
 ```
 
 A timer pumps `uj_tick` at 60 Hz and redraws the 3D viewport, so `bpy`
-edits from the REPL appear immediately. Press P in the viewport (or
+edits from the REPL appear immediately. The viewport opens in EEVEE Rendered
+mode through the scene camera, so materials, the world and displacement show
+as they are built (`UPBGE_JOLT_VIEW=MATERIAL|SOLID|KEEP` to change it, or
+`(bpy/viewport! {:shading "MATERIAL" :camera? false})` from the REPL). Press P in the viewport (or
 `(bpy/ops "view3d.game_start")`) to play the scene.
 
 Play a scene in the game engine (windowed), one command:

@@ -126,3 +126,22 @@
   "Remove `obj` from the file entirely (bpy.data.objects.remove)."
   [obj]
   (b/call (b/get (data) "objects") "remove" {:object obj :do_unlink true}))
+
+(defn viewport!
+  "Set every 3D viewport's display, so REPL work is visible as it happens:
+  :shading \"RENDERED\" (EEVEE: materials, world sky, displacement, lights),
+  \"MATERIAL\" or \"SOLID\"; :camera? true looks through the scene camera.
+  Returns the number of viewports changed."
+  [{:keys [shading camera?] :or {shading "RENDERED"}}]
+  (let [screen (b/get (b/context) "screen")
+        areas (filter #(= "VIEW_3D" (:idname (b/get % "type"))) (b/coll screen "areas"))]
+    (doseq [area areas
+            :let [space (b/get (b/get area "spaces") "active")]]
+      (let [sh (b/get space "shading")]
+        (b/set! sh "type" shading)
+        (when (= shading "MATERIAL")
+          (b/set! sh "use_scene_world" true)
+          (b/set! sh "use_scene_lights" true)))
+      (when (some? camera?)
+        (b/set! (b/get space "region_3d") "view_perspective" (if camera? "CAMERA" "PERSP"))))
+    (count areas)))
