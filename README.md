@@ -61,7 +61,13 @@ Two directions of calling:
 - `native/upbge_shim.h` — the C ABI contract both shims implement.
 - `native/mock_shim.c` — mock host for headless tests (Scene/Cube/Lamp/Mesh).
 - `host/harness.c` — C harness proving the embedding contract end to end.
-- `host/upbgejolt_shim.cc` — the real shim over RNA (needs a UPBGE build).
+- `host/upbgejolt_shim.cc` — the real shim over RNA (Blender 4.x API).
+- `host/upbge_jolt.cc` — host integration: `uj_host_init` / `uj_host_tick`
+  (dlopen `libjolt_upbge`, start the nREPL server, point the shim at the scene).
+- `host/upbge_jolt_bootstrap.py` — Python bootstrap: loads the runtime and
+  pumps `uj_host_tick` on the main thread (run with `blender -b --python ...`).
+- `host/integrate.sh` — drops the shim + integration into a cloned UPBGE
+  tree, applies the build fixes, configures and builds.
 - `test/` — clojure.test suites + runner.
 
 ## Tasks
@@ -81,6 +87,18 @@ Harness (embedding contract check):
 cc -o /tmp/uj_harness host/harness.c -ldl
 /tmp/uj_harness ./libjolt_upbge.dylib
 ```
+
+Build + run against the real engine (after `jolt upbge-deps` clones UPBGE):
+
+```
+host/integrate.sh                                   # integrate + build
+UPBGE_JOLT_LIB=$PWD/libjolt_upbge.dylib \
+  native/upbge/build_darwin/bin/Blender.app/Contents/MacOS/Blender \
+  --background --python host/upbge_jolt_bootstrap.py
+```
+
+The bootstrap prints the nREPL port; connect an editor and evaluate against
+the live scene (see the README top).
 
 ## Threading contract
 
@@ -104,7 +122,9 @@ it on the frame. Reentrant calls (from inside a tick-drained op) run inline.
       (create meshes, build geometry, link objects into the scene graph) —
       against the mock shim; the real shim's DNA/BKE code is unverified
 - [x] `--library` build + C harness (init/tick/eval/repl/rebind) — 14 checks
-- [ ] Real shim over RNA (host/upbgejolt_shim.cc) — needs a UPBGE build
+- [x] Real shim over RNA (host/upbgejolt_shim.cc) — compiles, links and runs
+      against the live UPBGE engine: objects enumerate, get/set round-trips,
+      and `bpy/add!` creates + links a mesh object
 - [ ] Operator layer (`bpy.ops` equivalent: WM_operatortype_find etc.)
 - [ ] Engine layer (KX scene/objects, sensors, input)
 - unchecked box = in progress or planned
