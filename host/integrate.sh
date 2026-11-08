@@ -201,12 +201,47 @@ src = src.replace(old, old + "  info.builtins(BuiltinBits::VERTEX_ID); /* upbge-
 open(path, "w").write(src)
 PY
 
+# --- standalone player (released games): link the shim, init the runtime ----
+BPC="$UPBGE/source/blenderplayer/CMakeLists.txt"
+grep -q "bf_upbge_jolt" "$BPC" || python3 - "$BPC" <<'PY'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old = "target_link_libraries(blenderplayer PRIVATE ${LIB})\n"
+if old not in src:
+    sys.exit("integrate.sh: blenderplayer link line not found")
+src = src.replace(old, old + """# upbge-jolt: the shim and host integration, kept whole like in blender
+if(APPLE)
+  target_link_libraries(blenderplayer PRIVATE bf_upbge_jolt "-Wl,-force_load,$<TARGET_FILE:bf_upbge_jolt>")
+else()
+  target_link_libraries(blenderplayer PRIVATE "-Wl,--whole-archive" bf_upbge_jolt "-Wl,--no-whole-archive")
+endif()
+""", 1)
+open(path, "w").write(src)
+PY
+
+GPG="$UPBGE/source/gameengine/GamePlayer/GPG_ghost.cpp"
+grep -q "uj_host_init_player" "$GPG" || python3 - "$GPG" <<'PY'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old = "            LA_PlayerLauncher launcher(system,"
+if old not in src:
+    sys.exit("integrate.sh: LA_PlayerLauncher construction not found")
+src = src.replace(old, "            uj_host_init_player(); /* upbge-jolt: runtime for the game's jolt code */\n" + old, 1)
+src = src.replace('#include "LA_PlayerLauncher.h"', '#include "LA_PlayerLauncher.h"\n\nextern "C" int uj_host_init_player();', 1)
+open(path, "w").write(src)
+PY
+
 # --- configure + build ------------------------------------------------------
+# UPBGE_JOLT_TARGET picks what to build: install (default: blender and the
+# player, installed into build_darwin/bin), or a single target such as
+# blenderplayer (leaves a running Blender's files alone).
 NPROC="$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
 env CMAKE_POLICY_VERSION_MINIMUM=3.5 \
   cmake -S "$UPBGE" -B "$UPBGE/build_darwin" \
-  -DCMAKE_BUILD_TYPE_INIT:STRING=Release -DWITH_PLAYER=OFF
+  -DCMAKE_BUILD_TYPE_INIT:STRING=Release -DWITH_PLAYER=ON
 
-make -C "$UPBGE/build_darwin" -j "$NPROC" install
+make -C "$UPBGE/build_darwin" -j "$NPROC" "${UPBGE_JOLT_TARGET:-install}"
 
 echo "built: $UPBGE/build_darwin/bin/Blender.app/Contents/MacOS/Blender"

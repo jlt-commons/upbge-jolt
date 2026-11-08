@@ -16,3 +16,4 @@ __pycache__/
 example/yacht/*.png
 example/yacht/*.blend
 example/yacht/*.blend1
+release/

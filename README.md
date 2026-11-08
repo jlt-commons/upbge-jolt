@@ -147,6 +147,24 @@ The game loop pumps `uj_tick` each frame (`uj_host_game_tick`, hooked into
 `KX_KetsjiEngine::NextFrame`); when the game ends the editor pump takes over,
 so the REPL stays up and the game can be restarted with `(game/start!)`.
 
+## Releasing a game
+
+```
+host/release.sh scene.blend "Game Name"      # -> release/Game Name.app + .zip
+```
+
+The app is the UPBGE standalone player with the jolt runtime linked in,
+Blender's runtime resources, `libjolt_upbge.dylib` and the .blend; the game's
+`main.clj` (stored in the .blend) runs when it starts. It opens windowed
+(pass `-f` for fullscreen) and needs no environment: the player finds the
+runtime beside its executable or in the bundle's Resources. To debug a
+running release, launch it with `UPBGE_JOLT_REPL=1` (and
+`UPBGE_JOLT_PORT_FILE=path` to get the port). The bundle is ad-hoc signed;
+sign with a Developer ID and notarize to distribute. Quit with Esc or by
+closing the window (the stock player ignores SIGTERM). Building the player
+needs `host/integrate.sh` (it configures `WITH_PLAYER=ON`;
+`UPBGE_JOLT_TARGET=blenderplayer` builds only the player).
+
 ## Game logic: upbge-jolt.game and upbge-jolt.bge
 
 A game's code lives in a Text datablock named `main.clj` inside the .blend,
@@ -244,6 +262,8 @@ it on the frame. Reentrant calls (from inside a tick-drained op) run inline.
       engine fix, but render wrong (white/black) and custom GLSL fails Metal
       translation; use EEVEE's TAA, ray tracing, fast GI, shadows,
       volumetrics and AgX/Filmic view transforms (all over RNA) meanwhile
+- [x] Release builds: `host/release.sh` packages a .blend with the player
+      and runtime as a standalone app — verified running main.clj at 60 fps
 - unchecked box = in progress or planned
 
 ## License
