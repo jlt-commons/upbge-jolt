@@ -2,8 +2,8 @@
   "The embedded runtime's own machinery: the op queue the host drains from
   its frame loop (uj_tick), and the nREPL server lifecycle (uj_start_repl /
   uj_stop_repl). This namespace must be loadable with NO host shim present —
-  it is what jolt_library_init brings up first."
-  (:require [clojure.string :as str]))
+  it is   what jolt_library_init brings up first."
+  (:require [ebb.core :as m]))
 
 ;; --- op queue ----------------------------------------------------------------
 ;;
@@ -31,18 +31,51 @@
       (binding [*out* *err*]
         (println "upbge-jolt: tick op failed:" (ex-message t))))))
 
+(def ^:dynamic *in-tick*
+  "True while draining the op queue on the host's tick/frame thread. The host
+  calls uj_tick on its own thread; every enqueued op runs under this binding,
+  so code that must not marshal again (the bridge's FFI calls) can see it is
+  already on the host thread and run inline."
+  false)
+
 (defn tick
   "Drain the op queue. Runs on the host's calling thread — the only consumer,
   so peek-then-pop needs no lock (enqueue! is many-producer, tick is
   one-consumer). Ops enqueued during a tick wait for the next one."
   []
   (swap! ticks inc)
-  (loop []
-    (when-let [f (peek @queue)]
-      (swap! queue pop)
-      (run-op! f)
-      (recur)))
+  (binding [*in-tick* true]
+    (loop []
+      (when-let [f (peek @queue)]
+        (swap! queue pop)
+        (run-op! f)
+        (recur))))
   nil)
+
+(defn on-host-thread?
+  "Whether the current thread is the host's tick/frame thread (inside a
+  tick-drained op)."
+  []
+  *in-tick*)
+
+(defn marshal
+  "Run `f` on the host's tick thread and return its value, blocking the caller
+  until it runs. Called from the tick thread itself (reentrantly) it runs
+  inline. Errors thrown by `f` are re-thrown on the calling thread.
+
+  Contract: the host must be ticking — draining the op queue — for a blocking
+  caller to return. If the host is not ticking, the caller blocks until it
+  resumes (the editor-side WM timer and the game-side frame loop are the two
+  pumps that guarantee this)."
+  [f]
+  (if *in-tick*
+    (f)
+    (let [d (m/dfv)]
+      (enqueue! (fn []
+                  (try (d [:ok (f)])
+                       (catch Throwable t (d [:err t])))))
+      (let [[tag v] (m/? d)]
+        (if (= :ok tag) v (throw v))))))
 
 (defn tick-count
   "Number of ticks run. Exposed for tests and for repl sessions to poll."

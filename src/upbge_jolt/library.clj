@@ -7,8 +7,9 @@
   thread may call into the runtime unless an export is :collect-safe. The
   frame-loop pattern — one thread calling uj_tick every frame — reaches a
   safe point on every tick, which is what keeps the collector happy. The
-  nREPL server's accept and session threads are jolt's own; they coordinate
-  through the op queue and jolt.host/call-on-main-thread."
+  nREPL server's accept and session threads are jolt's own; scene-touching
+  work marshals onto the host's tick thread through core/marshal (an op-queue
+  round-trip blocked on an ebb dataflow variable), drained by uj_tick."
   (:require [upbge-jolt.core :as core]
             [jolt.nrepl]            ; static so --library bakes it in
             [jolt.ffi :as ffi]))

@@ -7,7 +7,8 @@
   so they print, compare, and survive as REPL values. Strings returned by
   the host are valid only until the next ujs_* call, so every get copies
   into a jolt string immediately."
-  (:require [jolt.ffi :as ffi]))
+  (:require [upbge-jolt.core :as core]
+            [jolt.ffi :as ffi]))
 
 ;; ujs_pointer = {int64 owner, int64 type, void* data} — 24 bytes, natural
 ;; alignment 8. ujs_prop_desc = {char name[64], int32 type, int32 array_len,
@@ -108,24 +109,28 @@
 (defn reset-host!
   "Test hook: reset the mock host state."
   []
-  (ujs-test-reset))
+  (core/marshal (fn [] (ujs-test-reset))))
 
 (defn root
   "The root pointer (editor: context scene data / Main; mock: the Scene)."
   []
-  (let [out (ffi/alloc ptr-size)]
-    (try
-      (if (ujs-root out) (read-ptr! out) (host-error nil))
-      (finally (ffi/free out)))))
+  (core/marshal
+   (fn []
+     (let [out (ffi/alloc ptr-size)]
+       (try
+         (if (ujs-root out) (read-ptr! out) (host-error nil))
+         (finally (ffi/free out)))))))
 
 (defn prop-find
   "Describe property `name` on `p`, or nil when absent."
   [p name]
-  (with-ptr buf p
-    (let [out (ffi/alloc desc-size)]
-      (try
-        (when (ujs-prop-find buf name out) (read-desc! out))
-        (finally (ffi/free out))))))
+  (core/marshal
+   (fn []
+     (with-ptr buf p
+       (let [out (ffi/alloc desc-size)]
+         (try
+           (when (ujs-prop-find buf name out) (read-desc! out))
+           (finally (ffi/free out))))))))
 
 (defn- props-step
   "One iteration of property enumeration: [desc more?] — desc nil when done."
@@ -140,15 +145,17 @@
 (defn props
   "All property descriptors of `p`."
   [p]
-  (with-ptr buf p
-    (let [it (ujs-props-iter buf)]
-      (if (zero? it)
-        []
-        (loop [acc []]
-          (let [[d more?] (props-step it)]
-            (if more?
-              (recur (conj acc d))
-              (do (ujs-props-iter-free it) acc))))))))
+  (core/marshal
+   (fn []
+     (with-ptr buf p
+       (let [it (ujs-props-iter buf)]
+         (if (zero? it)
+           []
+           (loop [acc []]
+             (let [[d more?] (props-step it)]
+               (if more?
+                 (recur (conj acc d))
+                 (do (ujs-props-iter-free it) acc))))))))))
 
 ;; --- typed get: one helper per property type -------------------------------------
 
@@ -224,36 +231,40 @@
 (defn get-float-array-n
   "Read a dynamic-length float array property; returns a vector of doubles."
   [p name]
-  (with-ptr buf p
-    (let [d-out (ffi/alloc 8)
-          n-out (ffi/alloc 4)]
-      (try
-        (if (ujs-get-float-array-n buf name d-out n-out)
-          (let [data (ffi/read d-out :pointer)
-                n    (ffi/read n-out :int32)]
-            (try
-              (vec (map #(ffi/read data :double (* 8 %)) (range n)))
-              (finally (ffi/free data))))
-          (host-error name))
-        (finally (ffi/free d-out) (ffi/free n-out))))))
+  (core/marshal
+   (fn []
+     (with-ptr buf p
+       (let [d-out (ffi/alloc 8)
+             n-out (ffi/alloc 4)]
+         (try
+           (if (ujs-get-float-array-n buf name d-out n-out)
+             (let [data (ffi/read d-out :pointer)
+                   n    (ffi/read n-out :int32)]
+               (try
+                 (vec (map #(ffi/read data :double (* 8 %)) (range n)))
+                 (finally (ffi/free data))))
+             (host-error name))
+           (finally (ffi/free d-out) (ffi/free n-out))))))))
 
 (defn get
   "Read property `name` on `p`. Float arrays return vectors of doubles,
   enums as {:value n :idname \"...\"}, pointers as maps or nil."
   [p name]
-  (let [d (or (prop-find p name) (host-error name))]
-    (case (:type d)
-      :bool       (get-bool p name)
-      :int        (get-int p name)
-      :float      (if (not= 0 (:array-len d))
-                    (if (pos? (:array-len d))
-                      (get-float-fixed p name (:array-len d))
-                      (get-float-array-n p name))
-                    (get-float-scalar p name))
-      :string     (get-string p name)
-      :enum       (get-enum p name)
-      :pointer    (get-pointer p name)
-      :collection (host-error name))))
+  (core/marshal
+   (fn []
+     (let [d (or (prop-find p name) (host-error name))]
+       (case (:type d)
+         :bool       (get-bool p name)
+         :int        (get-int p name)
+         :float      (if (not= 0 (:array-len d))
+                       (if (pos? (:array-len d))
+                         (get-float-fixed p name (:array-len d))
+                         (get-float-array-n p name))
+                       (get-float-scalar p name))
+         :string     (get-string p name)
+         :enum       (get-enum p name)
+         :pointer    (get-pointer p name)
+         :collection (host-error name))))))
 
 ;; --- typed set: one helper per property type --------------------------------------
 
@@ -302,35 +313,39 @@
   "Write property `name` on `p`. Floats accept a scalar or a seq; pointers
   accept a map or nil (nil clears)."
   [p name v]
-  (let [d (or (prop-find p name) (host-error name))]
-    (case (:type d)
-      :bool       (set-bool! p name v)
-      :int        (set-int! p name v)
-      :float      (if (not= 0 (:array-len d))
-                    (set-float-array! p name v)
-                    (set-float-scalar! p name v))
-      :string     (set-string! p name v)
-      :enum       (set-enum! p name v)
-      :pointer    (set-pointer! p name v)
-      :collection (host-error name))))
+  (core/marshal
+   (fn []
+     (let [d (or (prop-find p name) (host-error name))]
+       (case (:type d)
+         :bool       (set-bool! p name v)
+         :int        (set-int! p name v)
+         :float      (if (not= 0 (:array-len d))
+                       (set-float-array! p name v)
+                       (set-float-scalar! p name v))
+         :string     (set-string! p name v)
+         :enum       (set-enum! p name v)
+         :pointer    (set-pointer! p name v)
+         :collection (host-error name))))))
 
 (defn set-float-array-n!
   "Write a dynamic-length float array property from a seq of doubles."
   [p name xs]
-  (set-float-array! p name xs))
+  (core/marshal (fn [] (set-float-array! p name xs))))
 
 ;; --- collections -------------------------------------------------------------------
 
 (defn coll-count
   "Length of collection property `name` on `p`."
   [p name]
-  (with-ptr buf p
-    (let [out (ffi/alloc 8)]
-      (try
-        (if (ujs-coll-len buf name out)
-          (ffi/read out :int64)
-          (host-error name))
-        (finally (ffi/free out))))))
+  (core/marshal
+   (fn []
+     (with-ptr buf p
+       (let [out (ffi/alloc 8)]
+         (try
+           (if (ujs-coll-len buf name out)
+             (ffi/read out :int64)
+             (host-error name))
+           (finally (ffi/free out))))))))
 
 (defn- coll-step
   "One iteration of collection enumeration: [member more?] — member may be
@@ -350,13 +365,15 @@
   [p name]
   ;; coll-len validates the property is a collection before the iterator
   ;; runs; a non-collection answers false with a message in last_error
-  (coll-count p name)
-  (with-ptr buf p
-    (let [it (ujs-coll-iter buf name)]
-      (if (zero? it)
-        []
-        (loop [acc []]
-          (let [[m more?] (coll-step it)]
-            (if more?
-              (recur (if m (conj acc m) acc))
-              (do (ujs-coll-iter-free it) acc))))))))
+  (core/marshal
+   (fn []
+     (coll-count p name)
+     (with-ptr buf p
+       (let [it (ujs-coll-iter buf name)]
+         (if (zero? it)
+           []
+           (loop [acc []]
+             (let [[m more?] (coll-step it)]
+               (if more?
+                 (recur (if m (conj acc m) acc))
+                 (do (ujs-coll-iter-free it) acc))))))))))

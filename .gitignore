@@ -8,3 +8,7 @@ native/upbge/
 native/build_*/
 .nrepl-port
 .cpcache/
+.clj-kondo/
+.lsp/
+.jolt/cpcache/
+.jolt-metrics.edn-cache/

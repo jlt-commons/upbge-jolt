@@ -10,8 +10,14 @@
 
  :paths ["src"]
 
- :deps {jolt-lang/nrepl {:git/url "https://github.com/jolt-lang/nrepl"
-                         :git/tag "v0.4.1" :git/sha "51c2572"}}
+  :deps {jolt-lang/nrepl {:git/url "https://github.com/jolt-lang/nrepl"
+                          :git/tag "v0.4.1" :git/sha "51c2572"}
+         ;; ebb (missionary on jolt) is the concurrency foundation: the
+         ;; bridge marshals RNA work onto the host tick thread through a
+         ;; dataflow variable, and the engine layer (sensors/input/frame
+         ;; events) rides ebb's flows. See src/upbge_jolt/core.clj.
+         jlt-commons/ebb {:git/url "https://github.com/jlt-commons/ebb"
+                          :git/sha "db4d72d12af7c961d40c70be924e03cfe2d6c959"}}
 
  ;; native/upbge_shim.c is compiled against the host UPBGE build. The dylib
  ;; ships beside the source, path-qualified so it loads relative to this

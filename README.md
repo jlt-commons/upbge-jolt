@@ -87,12 +87,16 @@ One jolt runtime per process. After `jolt_library_init`, the init thread
 owns the runtime; `uj_tick` is exported `:collect-safe` so the host's frame
 loop (same thread) drives collection safe points every frame. nREPL accept
 and session threads are jolt's own; scene-touching work from a session
-marshals onto the host thread via the op queue — `enqueue!` from the REPL,
-drained by `uj_tick` on the frame.
+marshals onto the host thread via the op queue — `core/marshal` enqueues the
+work and blocks the caller on an ebb dataflow variable, and `uj_tick` drains
+it on the frame. Reentrant calls (from inside a tick-drained op) run inline.
 
 ## Status
 
 - [x] Op queue + tick + nREPL start/stop/eval — tested headlessly
+- [x] Thread marshalling: bridge calls run on the host tick thread via
+      `core/marshal` (ebb dataflow variable), reentrant inline — tested with a
+      tick-pump thread
 - [x] Bridge: typed get/set, arrays (fixed + dynamic), enums, pointers,
       collections, introspection — against the mock shim
 - [x] `--library` build + C harness (init/tick/eval/repl/rebind) — 14 checks

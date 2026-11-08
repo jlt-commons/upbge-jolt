@@ -2,12 +2,14 @@
   "Property/collection marshalling against the mock host shim
   (native/mock_shim.c, loaded as native/libupbge_shim.dylib)."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [upbge-jolt.bridge :as b]))
+            [upbge-jolt.bridge :as b]
+            [upbge-jolt.tick-pump :as pump]))
 
 (defn reset-mock [f]
   (#'b/reset-host!)
   (f))
 
+(use-fixtures :once pump/fixture)
 (use-fixtures :each reset-mock)
 
 (deftest root-pointer

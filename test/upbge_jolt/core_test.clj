@@ -1,7 +1,8 @@
 (ns upbge-jolt.core-test
   "Op queue, tick, eval, and nREPL lifecycle."
   (:require [clojure.test :refer [deftest is testing]]
-            [upbge-jolt.core :as c]))
+            [upbge-jolt.core :as c]
+            [upbge-jolt.tick-pump :as pump]))
 
 (deftest queue-and-tick
   (testing "an enqueued op runs on tick"
@@ -36,6 +37,19 @@
   (testing "eval-string reports errors as text, does not throw"
     (is (re-find #"unable to resolve|no such var|Unable to resolve"
                  (c/eval-string "no-such-fn-here")))))
+
+(deftest marshal
+  (pump/with-tick-pump
+    (testing "marshal runs on the tick thread and returns its value"
+      (is (= 42 (c/marshal (fn [] 42)))))
+    (testing "on-host-thread? is true inside a marshalled op, false outside"
+      (is (true? (c/marshal c/on-host-thread?)))
+      (is (false? (c/on-host-thread?))))
+    (testing "marshal is reentrant: a marshalled op that marshals again runs inline"
+      (is (= :nested (c/marshal (fn [] (c/marshal (fn [] :nested)))))))
+    (testing "errors propagate to the caller"
+      (is (thrown-with-msg? Exception #"boom"
+            (c/marshal (fn [] (throw (ex-info "boom" {})))))))))
 
 (deftest repl-lifecycle
   (let [stop (c/start-repl! 0)]
