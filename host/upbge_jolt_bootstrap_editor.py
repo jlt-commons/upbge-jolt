@@ -30,12 +30,10 @@ _tick = None
 
 
 def _pump():
+    # Bridge writes run RNA updates and send notifiers, so the viewport
+    # redraws only when something changed. Forcing a redraw here made the
+    # Rendered viewport re-render (and restart TAA) every tick, even idle.
     _tick()
-    # bridge writes go through RNA without notifiers; redraw so they show
-    for window in bpy.context.window_manager.windows:
-        for area in window.screen.areas:
-            if area.type == "VIEW_3D":
-                area.tag_redraw()
     return STEP
 
 

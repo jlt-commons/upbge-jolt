@@ -212,8 +212,10 @@ edits to Blender data are undone when the game ends, by the same restore.
 
 ## Shaders driven from game logic
 
-`upbge-jolt.nodes` builds node trees; a Value node set every frame from
-`game/on-frame!` feeds game state into shaders at full frame rate. Verified
+`upbge-jolt.nodes` builds node trees; `nodes/object-params!` feeds game
+state into shaders through the object's color, set every frame from
+`game/on-frame!` (cheaper than setting a Value node, which makes EEVEE
+regenerate the material each frame). Verified
 in the running game at 60 fps: a time value animating EEVEE vertex
 displacement (`displacement_method` "DISPLACEMENT", the GPU half of a wave
 function whose CPU twin in jolt drives buoyancy), and a moving mask making

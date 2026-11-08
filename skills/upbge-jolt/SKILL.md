@@ -113,9 +113,14 @@ In `main.clj`:
 - Riding a moving vehicle: `(bge/parent! player boat)`.
 - Walking: `(bge/raycast from to player)` returns `{:object :point :normal}`
   or nil.
-- Driving shaders: build a Value node with `(nodes/value! nt "time" 0)`.
-  In `main.clj`, look its output socket up again and
-  `(b/set! socket "default_value" t)` every frame.
+- Driving shaders: use `(nodes/object-params! nt)` in the editor, which
+  gives `{:r :g :b :a}` sockets fed by the object's color. Per frame,
+  `(b/set! (bge/blender-object obj) "color" [t 0 0 1])`. Don't set Value
+  nodes every frame: that makes EEVEE regenerate the material each frame.
+- Performance: the game renders with EEVEE every frame, so keep
+  `use_raytracing` off and `taa_samples` low for play, and check
+  `(:fps (bge/frame-info))`. Do bulk mesh edits with `b/foreach-set!`
+  (positions, `material_index`), not per-element calls.
 - Sound: `(audio/play (audio/lowpass (audio/tone :sawtooth 55) 500 1)
   {:loop? true})`, then call `audio/pitch!` and `audio/volume!` per frame.
 

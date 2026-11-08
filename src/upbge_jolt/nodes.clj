@@ -7,9 +7,11 @@
     (nodes/link! nt noise \"Fac\" (nodes/find nt \"Principled BSDF\") \"Roughness\")
 
   Sockets are named (\"Base Color\") or indexed (0, 1 — needed for Math
-  nodes, whose inputs share the name \"Value\"). A Value node driven every
-  frame from upbge-jolt.game/on-frame! (see `value!`) is how game logic feeds
-  shaders: wave time, hull masks, time of day."
+  nodes, whose inputs share the name \"Value\"). Game logic feeds shaders
+  through `object-params!` (the object's color, set every frame: wave time,
+  hull masks, time of day). Setting a Value node (`value!`) every frame also
+  works but makes EEVEE regenerate the material each frame, which is costly
+  for large node trees; use it for values that change rarely."
   (:refer-clojure :exclude [find])
   (:require [upbge-jolt.bridge :as b]))
 
@@ -84,3 +86,20 @@
       (b/set! slot "material" mat)
       (b/call mats "append" {:material mat}))
     mat))
+
+(defn object-params!
+  "Four shader parameters read from the rendered object's `color` property
+  (RGBA), the cheap way to feed per-frame game state into a material:
+  returns {:r :g :b :a} output sockets to link from. Drive them from game
+  code with (b/set! (bge/blender-object obj) \"color\" [r g b a]). Unlike
+  setting a Value node every frame, this does not invalidate the compiled
+  material, so EEVEE does not regenerate it each frame."
+  [nt]
+  (let [attr (node! nt "ShaderNodeAttribute"
+                    {:props {"attribute_type" "OBJECT" "attribute_name" "color"}})
+        sep (node! nt "ShaderNodeSeparateColor")]
+    (link! nt attr "Color" sep "Color")
+    {:r (socket sep :out "Red")
+     :g (socket sep :out "Green")
+     :b (socket sep :out "Blue")
+     :a (socket attr :out "Alpha")}))

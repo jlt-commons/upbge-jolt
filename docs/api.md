@@ -544,9 +544,11 @@ Building node trees (materials, worlds, geometry nodes) from the REPL.
   (nodes/link! nt noise "Fac" (nodes/find nt "Principled BSDF") "Roughness")
 
 Sockets are named ("Base Color") or indexed (0, 1 — needed for Math
-nodes, whose inputs share the name "Value"). A Value node driven every
-frame from upbge-jolt.game/on-frame! (see `value!`) is how game logic feeds
-shaders: wave time, hull masks, time of day.
+nodes, whose inputs share the name "Value"). Game logic feeds shaders
+through `object-params!` (the object's color, set every frame: wave time,
+hull masks, time of day). Setting a Value node (`value!`) every frame also
+works but makes EEVEE regenerate the material each frame, which is costly
+for large node trees; use it for values that change rarely.
 
 ### `material!`
 
@@ -611,6 +613,17 @@ returns its output socket, whose "default_value" is set per frame.
 `(assign! obj mat)`
 
 Put material `mat` on object `obj`'s first slot (adding a slot if empty).
+
+### `object-params!`
+
+`(object-params! nt)`
+
+Four shader parameters read from the rendered object's `color` property
+(RGBA), the cheap way to feed per-frame game state into a material:
+returns {:r :g :b :a} output sockets to link from. Drive them from game
+code with (b/set! (bge/blender-object obj) "color" [r g b a]). Unlike
+setting a Value node every frame, this does not invalidate the compiled
+material, so EEVEE does not regenerate it each frame.
 
 
 ## upbge-jolt.game

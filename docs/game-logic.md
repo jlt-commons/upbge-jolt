@@ -110,22 +110,41 @@ while the game runs.
 
 ## Shaders driven from game code
 
-A Value node set every frame feeds game state into a material at full frame
-rate:
+Feed per-frame game state into materials through the object's `color`
+(RGBA). The shader reads it as a uniform, and changing it doesn't invalidate
+the compiled material:
 
 ```clojure
-(def t (nodes/value! nt "time" 0.0))     ; built in the editor
-;; in main.clj, after looking the socket up again:
-(let [t (-> (b/lookup (b/data) "materials" "Sea") nodes/tree (nodes/find "time") (nodes/socket :out 0))
-      clock (atom 0.0)]
-  (game/on-frame! :sea (fn [dt] (b/set! t "default_value" (swap! clock + dt)))))
+;; in the editor: four parameters from the rendered object's color
+(def p (nodes/object-params! nt))          ; {:r :g :b :a} output sockets
+(nodes/link! nt (b/get (:r p) "node") "Red" phase-node 1)
+
+;; in main.clj
+(let [sea (bge/blender-object (bge/object "Sea")) clock (atom 0.0)]
+  (game/on-frame! :sea (fn [dt] (b/set! sea "color" [(swap! clock + dt) 0 0 1]))))
 ```
 
-This was verified at 60 fps in the running game, for two uses:
+Setting a Value node's `default_value` every frame also works, but it makes
+EEVEE regenerate the material from its node tree every frame. That costs
+real CPU for large trees (an ocean or sky graph), so reserve `nodes/value!`
+for values that change rarely.
+
+This was verified in the running game at 60 fps, for two uses:
 - **Waves on CPU and GPU from one function.** Write the Gerstner function in
-  the shader nodes (EEVEE displacement) and the same function in Clojure for
-  buoyancy sampling.
+  the shader nodes (EEVEE displacement), with time from `color.r`, and the
+  same function in Clojure for buoyancy sampling.
 - **Masks.** A moving transparency footprint keeps the sea out of a hull.
+
+## Performance
+
+- A game at a fixed frame rate sleeps between frames (`integrate.sh`
+  restores the frame limiter UPBGE had commented out). An idle scene uses
+  about 15% of a core at 60 fps, and the editor about 2% when idle.
+- The game renders with EEVEE every frame, so ray tracing and high
+  `taa_samples` are the main costs. Measure with `(bge/frame-info)`, and keep
+  `use_raytracing` off and `taa_samples` low for play.
+- Do bulk mesh edits with `b/foreach-set!` (vertex positions,
+  `material_index`), not per-element calls.
 
 ## Audio
 

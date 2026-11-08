@@ -201,6 +201,41 @@ src = src.replace(old, old + "  info.builtins(BuiltinBits::VERTEX_ID); /* upbge-
 open(path, "w").write(src)
 PY
 
+# --- fixed frame rate: sleep between frames instead of spinning -------------
+# UPBGE commented the sleep out, so a game busy-waits a whole core between
+# frames. Restore it: sleep until 2ms before the next frame, spin the rest.
+grep -q "upbge-jolt: frame sleep" "$KXE" || python3 - "$KXE" <<'PY'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old = """  //// Else in case of fixed framerate, try to sleep until the next frame.
+  // else if (m_flags & FIXED_FRAMERATE) {
+  //  const double sleeptime = timestep - dt - 1.0e-3;
+  //  /* If the remaining time is greater than 1ms (sleep resolution) sleep this thread.
+  //   * The other 1ms will be busy wait.
+  //   */
+  //  if (sleeptime > 0.0) {
+  //    std::this_thread::sleep_for(std::chrono::nanoseconds((long)(sleeptime * 1.0e9)));
+  //  }
+  //}
+"""
+new = """  /* upbge-jolt: frame sleep. Else in case of fixed framerate, sleep until
+   * 2ms before the next frame (macOS sleeps overshoot) and busy-wait the rest. */
+  else if (m_flags & FIXED_FRAMERATE) {
+    const double sleeptime = timestep - dt - 2.0e-3;
+    if (sleeptime > 0.0) {
+      std::this_thread::sleep_for(std::chrono::nanoseconds((long)(sleeptime * 1.0e9)));
+    }
+  }
+"""
+if old not in src:
+    sys.exit("integrate.sh: frame sleep block not found in " + path)
+src = src.replace(old, new, 1)
+if "#include <thread>" not in src:
+    src = src.replace("#include <", "#include <chrono>\n#include <thread>\n#include <", 1)
+open(path, "w").write(src)
+PY
+
 # --- standalone player (released games): link the shim, init the runtime ----
 BPC="$UPBGE/source/blenderplayer/CMakeLists.txt"
 grep -q "bf_upbge_jolt" "$BPC" || python3 - "$BPC" <<'PY'
