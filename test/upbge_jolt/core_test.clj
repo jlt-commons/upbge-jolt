@@ -63,6 +63,22 @@
     (is (= [1 2 3] (map #(- % (dec (first @acc))) @acc)) "values are consecutive tick counts")
     (cancel)))
 
+(deftest frame-subscribers-run-on-host-thread
+  ;; per-frame game logic calls the bridge from a frame-flow subscriber; it
+  ;; runs inside tick on the host thread, so marshal must run inline there,
+  ;; not enqueue onto the thread that is busy running it (a deadlock)
+  (let [seen (atom [])
+        cancel ((m/reduce (fn [_ _]
+                            (swap! seen conj [(c/on-host-thread?)
+                                              (c/marshal (fn [] :ran))])
+                            nil)
+                          nil (c/frame-flow))
+                (fn [_] nil) (fn [_] nil))
+        t (future (c/tick) :ticked)]
+    (is (= :ticked (deref t 2000 :deadlocked)))
+    (is (= [[true :ran]] @seen))
+    (cancel)))
+
 (deftest repl-lifecycle
   (let [stop (c/start-repl! 0)]
     (testing "stop fn carries the bound port, no port file in embedded mode"

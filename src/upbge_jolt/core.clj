@@ -51,9 +51,11 @@
       (when-let [f (peek @queue)]
         (swap! queue pop)
         (run-op! f)
-        (recur))))
-  (doseq [emit @frame-emitters]
-    (emit @ticks))
+        (recur)))
+    ;; still on the host thread: subscribers that touch the scene must run
+    ;; inline here, not marshal onto the thread that is running them
+    (doseq [emit @frame-emitters]
+      (emit @ticks)))
   nil)
 
 (defn on-host-thread?
