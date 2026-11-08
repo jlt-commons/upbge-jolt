@@ -128,7 +128,11 @@ it on the frame. Reentrant calls (from inside a tick-drained op) run inline.
 - [x] Operator layer: `ujs_operator_call` / `bridge/operator!` / `bpy/ops`
       runs a named operator (`bpy.ops` equivalent, e.g.
       "mesh.primitive_cube_add") — verified against the live engine
-- [ ] Engine layer (KX scene/objects, sensors, input)
+- [x] Engine layer (frame events): `core/frame-flow` emits the tick count each
+      host frame as an ebb flow — the per-frame seam for driving the engine
+- [ ] Engine layer (KX scene/objects, sensors, input) — needs the game engine
+      running; `WM_init_game` requires a window + 3D view area, which
+      `--background` mode lacks
 - unchecked box = in progress or planned
 - Editor-side pump via WM_event_timer_add; game-side tick from NextFrame
 
