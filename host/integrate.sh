@@ -32,8 +32,10 @@ set(INC
   ../blenlib
   ../makesdna
   ../makesrna
+  ../python/intern
   ../windowmanager
   ../../../intern/guardedalloc
+  ${PYTHON_INCLUDE_DIR}
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
 )
 set(INC_SYS)
@@ -45,6 +47,7 @@ set(LIB
   PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
   PRIVATE bf::dna
+  bf_python
   bf_rna
   bf_windowmanager
 )

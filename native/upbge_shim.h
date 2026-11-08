@@ -141,6 +141,14 @@ bool ujs_mesh_from_pydata(ujs_pointer mesh,
 bool ujs_coll_add(ujs_pointer coll, const char *name, ujs_pointer member);
 bool ujs_coll_remove(ujs_pointer coll, const char *name, ujs_pointer member);
 
+/* ---- operators --------------------------------------------------------------
+ *
+ * The `bpy.ops` equivalent: run a named operator (e.g.
+ * "mesh.primitive_cube_add") with its default arguments, on the host's main
+ * thread. Returns true when the operator ran (finished). */
+
+bool ujs_operator_call(const char *opname);
+
 /* ---- test-only hooks (mock shim; never called against a real host) ---- */
 
 void ujs_test_reset(void);

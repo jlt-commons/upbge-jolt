@@ -151,3 +151,15 @@
         (b/coll-add! scene "objects" obj)
         (b/coll-add! scene "objects" obj)
         (is (= 3 (b/coll-count scene "objects")))))))
+
+(deftest operators
+  (let [scene (b/root)]
+    (testing "operator! runs a named operator and mutates the scene"
+      (is (true? (b/operator! "mesh.primitive_cube_add")))
+      (is (= ["Cube" "Lamp" "Cube"]
+             (map #(b/get % "name") (b/coll scene "objects")))))
+    (testing "operator! rejects an unknown operator"
+      (is (thrown-with-msg? Exception #"unknown operator"
+            (b/operator! "nonsense.op"))))
+    (testing "a no-op operator returns true"
+      (is (true? (b/operator! "object.select_all"))))))

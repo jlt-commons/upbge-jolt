@@ -94,3 +94,10 @@
   object."
   [name verts faces]
   (link! (add-object! name (add-mesh! (str name "-mesh") verts faces))))
+
+(defn ops
+  "Run the named operator (the `bpy.ops` equivalent, e.g.
+  \"mesh.primitive_cube_add\") with default arguments. Returns true when it
+  finished."
+  [opname]
+  (b/operator! opname))

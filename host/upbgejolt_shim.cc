@@ -41,6 +41,9 @@
 #include "BKE_lib_id.hh"
 #include "BKE_mesh.h"
 
+#include "WM_api.hh"
+#include "bpy_capi_utils.hh"
+
 #include "BLI_math_vector_types.hh"
 #include "BLI_span.hh"
 
@@ -579,6 +582,24 @@ extern "C" bool ujs_coll_remove(ujs_pointer coll, const char *name, ujs_pointer 
   }
   BKE_collection_object_remove(G_MAIN, col, static_cast<Object *>(mptr.data), false);
   return true;
+}
+
+/* ---- operators ---------------------------------------------------------------- */
+
+extern "C" bool ujs_operator_call(const char *opname)
+{
+  bContext *C = BPY_context_get();
+  if (C == nullptr) {
+    set_err("no context");
+    return false;
+  }
+  if (WM_operatortype_find(opname, true) == nullptr) {
+    set_err("unknown operator: %s", opname);
+    return false;
+  }
+  wmOperatorStatus status = WM_operator_name_call(
+      C, opname, wm::OpCallContext::ExecDefault, nullptr, nullptr);
+  return status & OPERATOR_FINISHED;
 }
 
 /* ---- root -------------------------------------------------------------------------- */

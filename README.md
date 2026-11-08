@@ -125,7 +125,9 @@ it on the frame. Reentrant calls (from inside a tick-drained op) run inline.
 - [x] Real shim over RNA (host/upbgejolt_shim.cc) — compiles, links and runs
       against the live UPBGE engine: objects enumerate, get/set round-trips,
       and `bpy/add!` creates + links a mesh object
-- [ ] Operator layer (`bpy.ops` equivalent: WM_operatortype_find etc.)
+- [x] Operator layer: `ujs_operator_call` / `bridge/operator!` / `bpy/ops`
+      runs a named operator (`bpy.ops` equivalent, e.g.
+      "mesh.primitive_cube_add") — verified against the live engine
 - [ ] Engine layer (KX scene/objects, sensors, input)
 - unchecked box = in progress or planned
 - Editor-side pump via WM_event_timer_add; game-side tick from NextFrame

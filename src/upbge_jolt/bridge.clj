@@ -56,6 +56,7 @@
   [:pointer :pointer :int32 :pointer :int32 :pointer :int32] :bool)
 (ffi/defcfn ujs-coll-add "ujs_coll_add" [:pointer :string :pointer] :bool)
 (ffi/defcfn ujs-coll-remove "ujs_coll_remove" [:pointer :string :pointer] :bool)
+(ffi/defcfn ujs-operator-call "ujs_operator_call" [:string] :bool)
 
 ;; --- pointer marshalling --------------------------------------------------------
 
@@ -491,3 +492,12 @@
      (with-ptr cbuf coll
        (with-ptr mbuf member
          (or (ujs-coll-remove cbuf name mbuf) (host-error name)))))))
+
+(defn operator!
+  "Run the named operator (the `bpy.ops` equivalent, e.g.
+  \"mesh.primitive_cube_add\") with its default arguments. Returns true when
+  the operator finished."
+  [opname]
+  (core/marshal
+   (fn []
+     (or (ujs-operator-call opname) (host-error opname)))))

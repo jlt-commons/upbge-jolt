@@ -483,5 +483,33 @@ bool ujs_coll_remove(ujs_pointer coll, const char *name, ujs_pointer member) {
   return true; /* not present: removal is a no-op */
 }
 
+/* --- operators ------------------------------------------------------------ */
+
+bool ujs_operator_call(const char *opname) {
+  if (strcmp(opname, "mesh.primitive_cube_add") == 0) {
+    /* a unit cube: 8 vertices, 6 quad faces (24 corner indices) */
+    static const double verts[24] = {
+      -1, -1, -1,   1, -1, -1,   1, 1, -1,  -1, 1, -1,
+      -1, -1,  1,   1, -1,  1,   1, 1,  1,  -1, 1,  1,
+    };
+    static const int32_t face_offsets[7] = {0, 4, 8, 12, 16, 20, 24};
+    static const int32_t face_indices[24] = {
+      0, 1, 2, 3,  4, 5, 6, 7,  0, 1, 5, 4,  2, 3, 7, 6,  0, 4, 7, 3,  1, 5, 6, 2,
+    };
+    ujs_pointer mesh, obj, scene;
+    if (!ujs_id_new("Mesh", "Cube", &mesh)) return false;
+    if (!ujs_mesh_from_pydata(mesh, verts, 8, face_offsets, 6, face_indices, 24)) return false;
+    if (!ujs_id_new("Object", "Cube", &obj)) return false;
+    ujs_set_pointer(obj, "data", mesh);
+    if (!ujs_root(&scene)) return false;
+    return ujs_coll_add(scene, "objects", obj);
+  }
+  if (strcmp(opname, "object.select_all") == 0) {
+    return true; /* no-op in the toy scene */
+  }
+  set_err("unknown operator");
+  return false;
+}
+
 /* free memory this shim handed out (ujs_get_float_array_n) */
 void ujs_free(void *ptr) { free(ptr); }
