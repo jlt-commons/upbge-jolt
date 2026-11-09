@@ -17,6 +17,7 @@
             [upbge-jolt.game :as game] ; game sessions, per-frame logic, main.clj
             [upbge-jolt.audio]      ; procedural/file audio
             [upbge-jolt.nodes]      ; node-tree building
+            [upbge-jolt.boot :as boot] ; host startup (the C++ hook calls uj_boot)
             [jolt.nrepl]            ; static so --library bakes it in
             [jolt.ffi :as ffi]))
 
@@ -40,6 +41,18 @@
           (println "uj_start_repl failed:" (ex-message t)))
         -1)))
   [:int] :int)
+
+;; host startup: the C++ hook (uj_host_start) calls this once the runtime and
+;; the server are up, with the UPBGE_JOLT mode ("editor", "play", "headless")
+(ffi/export! "uj_boot"
+  (fn [mode]
+    (try (boot/boot! (ffi/ptr->string mode)) 0
+         (catch Throwable t
+           (binding [*out* *err*] (println "uj_boot failed:" (ex-message t)))
+           -1)))
+  ;; :collect-safe: the host calls it from the init thread after
+  ;; jolt_library_release_thread, like uj_tick
+  [:pointer] :int :collect-safe)
 
 ;; idempotent, callable whether or not a server ever started
 (ffi/export! "uj_stop_repl" (fn [] (core/stop-repl!) 0) [] :int)

@@ -28,9 +28,11 @@
 
 #include "BKE_global.hh"
 #include "BKE_main.hh"
+#include "BLI_timer.hh"
 
 #include "DNA_scene_types.h"
 
+#include <csignal>
 #include <dlfcn.h>
 #include <string>
 #include <unistd.h>
@@ -39,6 +41,7 @@
 #endif
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 using namespace blender;
 
@@ -205,4 +208,104 @@ extern "C" int uj_host_game_tick()
     return g_tick();
   }
   return 0;
+}
+
+/* ---- startup hook --------------------------------------------------------------
+
+ * Called from Blender's main() after the file loads, before the event loop.
+ * Does nothing unless UPBGE_JOLT names a mode ("editor", "play",
+ * "headless"); then starts the runtime and the nREPL server, writes the port
+ * to UPBGE_JOLT_PORT_FILE (default ./.nrepl-port, removed at exit), hands the
+ * window manager's context to the shim, pumps the runtime from a WM timer,
+ * and lets the jolt side (upbge-jolt.boot) set up the mode. Headless mode
+ * has no event loop, so it pumps from a loop of its own and never returns.
+ * Returns 1 when active (the caller then skips the splash). */
+
+extern "C" void uj_shim_set_context(bContext *C);
+typedef int (*uj_boot_fn)(const char *mode);
+
+static std::string g_port_file;
+
+static void remove_port_file()
+{
+  if (g_port_file.empty()) return;
+  FILE *f = fopen(g_port_file.c_str(), "r");
+  if (f == nullptr) return;
+  int port = 0;
+  bool ours = fscanf(f, "%d", &port) == 1 && port == g_port;
+  fclose(f);
+  if (ours) remove(g_port_file.c_str());
+}
+
+/* atexit doesn't run when the process is killed by a signal, which would
+ * leave a stale .nrepl-port pointing at a dead server: remove it on
+ * SIGTERM/SIGINT too, then let the previous disposition take over. */
+static void (*g_prev_term)(int) = SIG_DFL;
+static void (*g_prev_int)(int) = SIG_DFL;
+
+static void on_signal(int sig)
+{
+  remove_port_file();
+  signal(sig, sig == SIGTERM ? g_prev_term : g_prev_int);
+  raise(sig);
+}
+
+static void write_port_file(int port)
+{
+  const char *env = getenv("UPBGE_JOLT_PORT_FILE");
+  std::string path = env != nullptr ? env : ".nrepl-port";
+  if (!path.empty() && path[0] != '/') {
+    char cwd[4096];
+    if (getcwd(cwd, sizeof cwd) != nullptr) path = std::string(cwd) + "/" + path;
+  }
+  FILE *f = fopen(path.c_str(), "w");
+  if (f == nullptr) {
+    fprintf(stderr, "upbge-jolt: could not write %s\n", path.c_str());
+    return;
+  }
+  fprintf(f, "%d", port);
+  fclose(f);
+  g_port_file = path;
+  atexit(remove_port_file);
+  g_prev_term = signal(SIGTERM, on_signal);
+  g_prev_int = signal(SIGINT, on_signal);
+  if (g_prev_term == SIG_ERR) g_prev_term = SIG_DFL;
+  if (g_prev_int == SIG_ERR) g_prev_int = SIG_DFL;
+  fprintf(stderr, "upbge-jolt: wrote %s\n", path.c_str());
+}
+
+static double pump_timer(uintptr_t /*uuid*/, void * /*user_data*/)
+{
+  uj_host_tick();
+  return 1.0 / 60.0;
+}
+
+extern "C" int uj_host_start(bContext *C)
+{
+  const char *mode = getenv("UPBGE_JOLT");
+  if (mode == nullptr || mode[0] == '\0') return 0;
+  if (strcmp(mode, "editor") != 0 && strcmp(mode, "play") != 0 && strcmp(mode, "headless") != 0) {
+    fprintf(stderr, "upbge-jolt: unknown UPBGE_JOLT mode %s (editor, play, headless)\n", mode);
+    return 0;
+  }
+  uj_shim_set_context(C);
+  int port = uj_host_init();
+  if (port <= 0) {
+    fprintf(stderr, "upbge-jolt: runtime failed to start\n");
+    return 0;
+  }
+  write_port_file(port);
+  uj_boot_fn boot = (uj_boot_fn)lookup("uj_boot");
+  if (boot != nullptr) boot(mode);
+
+  if (G.background) {
+    /* no event loop in background mode: pump here until killed */
+    for (;;) {
+      uj_host_tick();
+      usleep(20000);
+    }
+  }
+  BLI_timer_register((uintptr_t)&pump_timer, pump_timer, nullptr, nullptr, 1.0 / 60.0, true);
+  fprintf(stderr, "upbge-jolt: %s mode, runtime pumped at 60 Hz\n", mode);
+  return 1;
 }

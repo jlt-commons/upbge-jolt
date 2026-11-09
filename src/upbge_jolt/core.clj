@@ -14,6 +14,7 @@
 (def ^:private queue (atom clojure.lang.PersistentQueue/EMPTY))
 (def ^:private ticks (atom 0))
 (def ^:private frame-emitters (atom #{}))
+(def ^:private deferred (atom []))     ; [[due-tick f] ...]
 
 (defn enqueue!
   "Queue `f` to run on the host thread at the next tick. Safe from any
@@ -52,10 +53,24 @@
         (swap! queue pop)
         (run-op! f)
         (recur)))
+    ;; deferred work whose tick has come (host startup: after the window is up)
+    (let [now @ticks
+          due (filter #(<= (first %) now) @deferred)]
+      (when (seq due)
+        (swap! deferred (fn [ds] (vec (remove #(<= (first %) now) ds))))
+        (doseq [[_ f] due] (run-op! f))))
     ;; still on the host thread: subscribers that touch the scene must run
     ;; inline here, not marshal onto the thread that is running them
     (doseq [emit @frame-emitters]
       (emit @ticks)))
+  nil)
+
+(defn after-ticks!
+  "Run `f` on the host thread once `n` more ticks have run (n >= 1). For host
+  startup work that needs the window drawn first. A throwing f is reported
+  like a failed op."
+  [n f]
+  (swap! deferred conj [(+ @ticks (max 1 n)) f])
   nil)
 
 (defn on-host-thread?

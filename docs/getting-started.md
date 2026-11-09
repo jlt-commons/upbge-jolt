@@ -24,32 +24,38 @@ the running engine.
 
 ## Run
 
-Three bootstraps, all of which start the nREPL server and write its port to
-`.nrepl-port` in the project root (removed on exit; override the location
-with `UPBGE_JOLT_PORT_FILE`):
-
 ```
-B=native/upbge/build_darwin/bin/Blender.app/Contents/MacOS/Blender
-export UPBGE_JOLT_LIB=$PWD/libjolt_upbge.dylib
-
-$B [scene.blend] --python host/upbge_jolt_bootstrap_editor.py   # live editing
-host/play.sh [scene.blend]                                       # play the game
-$B -b --python host/upbge_jolt_bootstrap.py                      # headless
+host/run.sh editor   [scene.blend]    # live editing (the default mode)
+host/run.sh play     scene.blend      # open and start the game (= host/play.sh)
+host/run.sh headless [scene.blend]    # no window
 ```
 
-**Editor** is the mode for building scenes. A timer drives the runtime at
-60 Hz and redraws the viewport. The viewport opens in EEVEE Rendered mode
-through the scene camera, so materials, the sky and displacement appear as
-they are built. Set `UPBGE_JOLT_VIEW=MATERIAL`, `SOLID` or `KEEP` to change
-that, or call `(bpy/viewport! {...})`. Start the game with P in the viewport
-or `(game/start!)`. When it ends, the editor carries on and the REPL stays up.
+No Python is involved. Blender's `main` has a startup hook
+(`uj_host_start`, added by `integrate.sh`) that does nothing unless
+`UPBGE_JOLT` names a mode; `host/run.sh` sets it. The hook:
 
-**Play** (`host/play.sh`) opens the file and starts the game right away. It
-is the editor bootstrap plus a game start, so the REPL survives the game
-ending.
+- loads the runtime and starts the nREPL server;
+- writes the port to `.nrepl-port` in the project root (override with
+  `UPBGE_JOLT_PORT_FILE`) and removes it on exit;
+- drives the runtime from a window-manager timer at 60 Hz;
+- hands off to `upbge-jolt.boot` for the mode's setup.
 
-**Headless** (`-b`) has no window and no game engine: scripted scene
-generation and tests.
+**Editor** is the mode for building scenes. The viewport opens in EEVEE
+Rendered mode through the scene camera, so materials, the sky and
+displacement appear as they are built. Set `UPBGE_JOLT_VIEW=MATERIAL`,
+`SOLID` or `KEEP` to change that, or call `(bpy/viewport! {...})`. Start the
+game with P in the viewport or `(game/start!)`. When it ends, the editor
+carries on and the REPL stays up.
+
+A watchdog keeps a GPU-heavy scene from locking up the editor: the REPL is
+served between viewport frames, so if Rendered frames repeatedly take
+seconds, the viewport drops to Solid and a message on stderr explains why.
+`UPBGE_JOLT_WATCHDOG=0` turns it off.
+
+**Play** opens the file and starts the game once the window has drawn.
+
+**Headless** has no window and no game engine: scripted scene generation and
+tests.
 
 ## Connect
 

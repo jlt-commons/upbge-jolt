@@ -236,6 +236,95 @@ if "#include <thread>" not in src:
 open(path, "w").write(src)
 PY
 
+# --- Metal: don't spin a core while waiting for the GPU ----------------------
+# wait_until_active_command_buffers_complete yields in a tight loop, so every
+# GPU readback (EEVEE's shadow module does one per game frame) busy-waits a
+# core for as long as the GPU is busy. Yield briefly, then sleep 100us.
+MTLH="$UPBGE/source/blender/gpu/metal/mtl_context.hh"
+grep -q "upbge-jolt: gpu wait" "$MTLH" || python3 - "$MTLH" <<'PY'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old = """    while (get_active_command_buffer_count()) {
+      std::this_thread::yield();
+    }"""
+new = """    /* upbge-jolt: gpu wait. Yield briefly, then sleep, rather than spin; and
+     * give up after 10s: a buffer waiting on an event that only work submitted
+     * after this wait can signal never completes, and waiting forever
+     * deadlocks the main thread (EEVEE's shadow readback hits this). */
+    for (int spins = 0; get_active_command_buffer_count(); spins++) {
+      if (spins < 64) {
+        std::this_thread::yield();
+      }
+      else if (spins < 64 + 100000) {
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
+      }
+      else {
+        fprintf(stderr, "upbge-jolt: gave up waiting for %d GPU command buffer(s)\\n",
+                int(get_active_command_buffer_count()));
+        break;
+      }
+    }"""
+if old not in src:
+    sys.exit("integrate.sh: Metal wait loop not found in " + path)
+open(path, "w").write(src.replace(old, new, 1))
+PY
+
+# --- startup hook: Blender's main starts the runtime (no Python) -------------
+CRE="$UPBGE/source/creator/creator.cc"
+grep -q "uj_host_start" "$CRE" || python3 - "$CRE" <<'PY'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+inc = '#include "creator_intern.h" /* Own include. */'
+call_old = """#ifndef WITH_PYTHON_MODULE
+  if (G.background) {
+    int exit_code;"""
+splash_old = """    /* Shows the splash as needed. */
+    WM_init_splash_on_startup(C);"""
+for old in (inc, call_old, splash_old):
+    if old not in src:
+        sys.exit("integrate.sh: creator.cc anchor not found: " + old.splitlines()[0])
+src = src.replace(inc, inc + '\n\n/* upbge-jolt: startup hook, see host/upbge_jolt.cc */\nextern "C" int uj_host_start(blender::bContext *C);', 1)
+src = src.replace(call_old, """#ifndef WITH_PYTHON_MODULE
+  /* upbge-jolt: start the embedded runtime when UPBGE_JOLT names a mode. */
+  const bool uj_active = uj_host_start(C) != 0;
+  if (G.background) {
+    int exit_code;""", 1)
+src = src.replace(splash_old, """    /* Shows the splash as needed (not under upbge-jolt). */
+    if (!uj_active) {
+      WM_init_splash_on_startup(C);
+    }""", 1)
+open(path, "w").write(src)
+PY
+
+# --- EEVEE: read shadow statistics from the oldest frame, never the newest --
+# Once viewport sampling finishes (every frame in a game) EEVEE swapped through
+# its 5-deep statistics swap-chain and read the newest buffer, a full CPU-GPU
+# sync per frame that keeps them from overlapping. The statistics only feed a
+# warning, so always read the oldest one.
+EVS="$UPBGE/source/blender/draw/engines/eevee/eevee_shadow.cc"
+grep -q "upbge-jolt: oldest statistics" "$EVS" || python3 - "$EVS" <<'PY'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old = """    if (inst_.sampling.finished_viewport()) {
+      /* Swap enough to read the last one. */
+      for (int i = 0; i < statistics_buf_.size(); i++) {
+        statistics_buf_.swap();
+      }
+    }
+    else {
+      statistics_buf_.swap();
+    }"""
+new = """    /* upbge-jolt: oldest statistics. Always read the end of the swap-chain:
+     * reading the newest forces a full GPU sync every frame. */
+    statistics_buf_.swap();"""
+if old not in src:
+    sys.exit("integrate.sh: shadow statistics swap not found in " + path)
+open(path, "w").write(src.replace(old, new, 1))
+PY
+
 # --- standalone player (released games): link the shim, init the runtime ----
 BPC="$UPBGE/source/blenderplayer/CMakeLists.txt"
 grep -q "bf_upbge_jolt" "$BPC" || python3 - "$BPC" <<'PY'

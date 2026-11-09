@@ -35,8 +35,7 @@ its own notes.
 
 ## Resume
 
-1. Open the scene in the editor:
-   `UPBGE_JOLT_LIB=$PWD/libjolt_upbge.dylib native/upbge/build_darwin/bin/Blender.app/Contents/MacOS/Blender $PWD/example/yacht/yacht.blend --python host/upbge_jolt_bootstrap_editor.py`
+1. Open the scene in the editor: `host/run.sh editor $PWD/example/yacht/yacht.blend`
 2. Connect over nREPL. Rebuilding the yacht from code is
    `(load-file ".../example/yacht/yacht.clj") (y/build!)`, but the .blend
    already holds the result.
@@ -62,6 +61,13 @@ its own notes.
 4. Write the README for the demo, per PROMPT.md section 9.
 
 ## Known problems
+
+- **GPU cost: about 12 s per frame with shadows on.** The sun's shadow map
+  covers the 16 km displaced Ocean out to HeroCam's 40 km `clip_end`. With
+  the ocean hidden, or shadows off, the editor runs at full speed. Fix
+  before anything else: shrink the ocean (or tile it near the camera), cut
+  `clip_end` to a few km, and set the Ocean's `visible_shadow` false. Then
+  measure fps in game.
 
 - The frame rate was low with ray tracing and high TAA. The previous session
   lowered quality; recheck `(:fps (bge/frame-info))` after item 1 above.

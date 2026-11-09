@@ -79,6 +79,21 @@
     (is (= [[true :ran]] @seen))
     (cancel)))
 
+(deftest after-ticks
+  (testing "a deferred fn runs on the host thread once n ticks have passed"
+    (let [seen (atom [])]
+      (c/after-ticks! 3 #(swap! seen conj (c/on-host-thread?)))
+      (c/tick) (c/tick)
+      (is (= [] @seen) "not before its tick")
+      (c/tick)
+      (is (= [true] @seen))
+      (c/tick)
+      (is (= [true] @seen) "and only once")))
+  (testing "a failing deferred fn is reported, not fatal"
+    (c/after-ticks! 1 #(throw (ex-info "boom" {})))
+    (c/tick)
+    (is (number? (c/tick-count)))))
+
 (deftest repl-lifecycle
   (let [stop (c/start-repl! 0)]
     (testing "stop fn carries the bound port, no port file in embedded mode"

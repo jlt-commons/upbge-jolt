@@ -30,12 +30,30 @@ Sound is disabled in Blender's preferences, or there is no output device.
 **A REPL eval never returns**
 Bridge calls wait for the host thread. If the host isn't ticking (a modal
 dialog is open, or a script blocks the main thread), they wait. The editor
-bootstrap pumps every frame, and the game pumps from its loop.
+pump runs between viewport frames, so a viewport frame that takes seconds
+delays every eval (see "Editor or game is slow" below); the game pumps from
+its loop.
 
 **The viewport doesn't change**
 Check the shading is Rendered or Material (`bpy/viewport!`) and the view is
 through the right camera. Displacement and the world only show when
 rendered.
+
+## Editor or game is slow
+
+The engine sleeps between game frames and never spins the CPU while waiting
+for the GPU. So a slow scene is GPU-bound: check with
+`(:fps (bge/frame-info))` in a game, or watch for the watchdog's message in
+the editor. Common causes:
+
+- **Shadows over very large or displaced surfaces.** The sun's shadow map
+  has to cover every surface out to the camera's `clip_end`. A kilometres-wide
+  displaced ocean with a 40 km clip distance was measured at about 12 s per
+  frame. Keep big surfaces modest, lower `clip_end`, or turn off shadow
+  casting on them (`visible_shadow`).
+- **High `taa_samples`, ray tracing, and fast GI.**
+- **Setting Value nodes every frame:** use `nodes/object-params!` instead
+  (see [game logic](game-logic.md)).
 
 ## Known limitations
 

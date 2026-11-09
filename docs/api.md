@@ -1118,6 +1118,14 @@ so peek-then-pop needs no lock (enqueue! is many-producer, tick is
 one-consumer). Ops enqueued during a tick wait for the next one. After the
 drain, notifies every frame emitter with the new tick count.
 
+### `after-ticks!`
+
+`(after-ticks! n f)`
+
+Run `f` on the host thread once `n` more ticks have run (n >= 1). For host
+startup work that needs the window drawn first. A throwing f is reported
+like a failed op.
+
 ### `on-host-thread?`
 
 `(on-host-thread?)`

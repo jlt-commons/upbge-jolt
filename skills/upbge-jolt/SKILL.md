@@ -16,10 +16,12 @@ The port is in `.nrepl-port` in the project root. If no engine is running,
 start one (editor mode, live viewport):
 
 ```
-UPBGE_JOLT_LIB=$PWD/libjolt_upbge.dylib \
-  native/upbge/build_darwin/bin/Blender.app/Contents/MacOS/Blender \
-  [scene.blend] --python host/upbge_jolt_bootstrap_editor.py
+host/run.sh editor [/abs/scene.blend]     # or: host/run.sh play /abs/scene.blend
 ```
+
+Don't launch or kill Blender yourself while a session is running unless
+you've been asked to. If the engine seems stuck, it's usually waiting on a
+heavy GPU frame: see `docs/troubleshooting.md` ("Editor or game is slow").
 
 Then in the REPL:
 

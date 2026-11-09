@@ -86,15 +86,13 @@ Two directions of calling:
 - `native/mock_shim.c` — mock host for headless tests (Scene/Cube/Lamp/Mesh).
 - `host/harness.c` — C harness proving the embedding contract end to end.
 - `host/upbgejolt_shim.cc` — the real shim over RNA (Blender 4.x API).
-- `host/upbge_jolt.cc` — host integration: `uj_host_init` / `uj_host_tick`
-  (dlopen `libjolt_upbge`, start the nREPL server, point the shim at the scene).
-- `host/upbge_jolt_bootstrap.py` — headless bootstrap: loads the runtime and
-  pumps `uj_host_tick` on the main thread (run with `blender -b --python ...`).
-- `host/upbge_jolt_bootstrap_editor.py` — windowed editor bootstrap: pumps
-  `uj_host_tick` from a `bpy.app.timers` callback so REPL edits show live.
-- `host/upbge_jolt_bootstrap_game.py` — windowed game bootstrap: starts the
-  game once the window has drawn; the game loop pumps the tick.
-- `host/upbge_jolt_portfile.py` — writes `.nrepl-port` for the bootstraps.
+- `host/upbge_jolt.cc` — host integration: `uj_host_start` (the startup hook
+  in Blender's main: runtime, nREPL server, port file, WM-timer pump),
+  `uj_host_tick` / `uj_host_game_tick`, `uj_host_init_player`. No Python.
+- `src/upbge_jolt/boot.clj` — the jolt side of startup: live view, game
+  start in play mode, the slow-viewport watchdog.
+- `host/run.sh` — `editor | play | headless` launcher; `host/play.sh` plays
+  a file; `host/release.sh` packages a game.
 - `host/integrate.sh` — drops the shim + integration into a cloned UPBGE
   tree, applies the build fixes, configures and builds.
 - `test/` — clojure.test suites + runner.
@@ -121,26 +119,20 @@ cc -o /tmp/uj_harness host/harness.c -ldl
 Build + run against the real engine (after `jolt upbge-deps` clones UPBGE):
 
 ```
-host/integrate.sh                                   # integrate + build
-UPBGE_JOLT_LIB=$PWD/libjolt_upbge.dylib \
-  native/upbge/build_darwin/bin/Blender.app/Contents/MacOS/Blender \
-  --background --python host/upbge_jolt_bootstrap.py
+host/integrate.sh                       # integrate + build Blender and the player
+host/run.sh editor [scene.blend]        # live editing
+host/run.sh play scene.blend            # open and start the game (host/play.sh)
+host/run.sh headless [scene.blend]      # no window
 ```
 
-Every bootstrap writes the port to `.nrepl-port` in the project root
-(override with `UPBGE_JOLT_PORT_FILE`) and removes it on exit, so editors and
+Blender itself starts the runtime: a hook in its `main` (`uj_host_start`)
+runs when `UPBGE_JOLT` names a mode, which `host/run.sh` sets. Without it
+Blender behaves as stock. The port goes to `.nrepl-port` in the project root
+(override with `UPBGE_JOLT_PORT_FILE`) and is removed on exit, so editors and
 agent nREPL tools autodiscover it.
 
-Build a scene interactively in the editor (windowed, live viewport):
-
-```
-UPBGE_JOLT_LIB=$PWD/libjolt_upbge.dylib \
-  native/upbge/build_darwin/bin/Blender.app/Contents/MacOS/Blender \
-  --python host/upbge_jolt_bootstrap_editor.py
-```
-
-A timer pumps `uj_tick` at 60 Hz and redraws the 3D viewport, so `bpy`
-edits from the REPL appear immediately. The viewport opens in EEVEE Rendered
+A WM timer pumps `uj_tick` at 60 Hz; bridge writes notify the editors, so
+`bpy` edits from the REPL appear immediately. The viewport opens in EEVEE Rendered
 mode through the scene camera, so materials, the world and displacement show
 as they are built (`UPBGE_JOLT_VIEW=MATERIAL|SOLID|KEEP` to change it, or
 `(bpy/viewport! {:shading "MATERIAL" :camera? false})` from the REPL). Press P in the viewport (or

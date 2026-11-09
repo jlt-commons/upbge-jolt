@@ -128,6 +128,22 @@ extern "C" const char *ujs_last_error(void)
   return g_last_error[0] ? g_last_error : nullptr;
 }
 
+/* ---- context ---------------------------------------------------------------------------- */
+
+/* The window manager's context, handed over by the host at startup
+ * (uj_host_start). Without it (the player) fall back to Python's. */
+static bContext *g_ctx = nullptr;
+
+extern "C" void uj_shim_set_context(bContext *C)
+{
+  g_ctx = C;
+}
+
+static bContext *ctx()
+{
+  return g_ctx != nullptr ? g_ctx : BPY_context_get();
+}
+
 /* ---- PointerRNA <-> ujs_pointer ------------------------------------------- */
 
 static PointerRNA as_rna(const ujs_pointer &up)
@@ -185,7 +201,7 @@ static PropertyRNA *find_prop_typed(ujs_pointer owner, const char *name, Propert
  * fall back to the Main-only update. */
 static void prop_updated(PointerRNA &ptr, PropertyRNA *prop)
 {
-  bContext *C = BPY_context_get();
+  bContext *C = ctx();
   if (C != nullptr) {
     RNA_property_update(C, &ptr, prop);
   }
@@ -702,7 +718,7 @@ extern "C" bool ujs_coll_remove(ujs_pointer coll, const char *name, ujs_pointer 
 
 extern "C" bool ujs_operator_call(const char *opname)
 {
-  bContext *C = BPY_context_get();
+  bContext *C = ctx();
   if (C == nullptr) {
     set_err("no context");
     return false;
@@ -1515,10 +1531,6 @@ extern "C" void ujs_snd_handle_free(void *handle)
 
 extern "C" void uj_set_root(ujs_pointer /*root*/) {}
 
-static bContext *ctx()
-{
-  return BPY_context_get();
-}
 
 extern "C" bool ujs_root(ujs_pointer *out)
 {
