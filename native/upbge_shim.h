@@ -11,14 +11,16 @@
  *    namespace (jolt.ffi :process / defcfn fallback).
  *
  *  - the MOCK shim (native/mock_shim.c): same ujs_* symbol names over plain
- *    C state, built as native/libupbge_shim.dylib and declared in deps.edn
- *    :jolt/native. defcfn resolves registered libraries first, so the tests
- *    exercise the real binding path headlessly, and the same runtime code
- *    runs unchanged against the real host when the mock dylib is absent.
+ *    C state, built as native/libupbge_shim.{dylib,so} and loaded by the
+ *    tests (test/upbge_jolt/mock_host.clj). defcfn resolves loaded
+ *    libraries first, so the tests exercise the real binding path
+ *    headlessly. It is never loaded inside the host.
  *
  * ujs_pointer carries an RNA data pointer plus the metadata needed to
  * revalidate it. The jolt side never dereferences .data; it hands it back
- * verbatim. Strings returned by ujs_* point at host memory valid until the
+ * verbatim. It always crosses by address (const ujs_pointer *): it is 24
+ * bytes, which arm64 passes by reference but x86-64 copies onto the stack,
+ * so a by-value parameter only worked on arm64. Strings returned by ujs_* point at host memory valid until the
  * next ujs_* call.
  *
  * Every function answers bool (or fills an out-param and answers bool);
@@ -46,7 +48,7 @@ enum {
   UJS_PROP_COLLECTION,
 };
 
-/* RNA pointer passed by value: (owner, type, data). data is host-owned and
+/* RNA pointer: (owner, type, data). data is host-owned and
  * opaque to the runtime. owner is a host object address usable as identity
  * for revalidation; type is the StructRNA* (0 when unknown). */
 typedef struct {
@@ -103,43 +105,43 @@ const int64_t *ujs_generation_ptr(void);
 bool ujs_context_root(ujs_pointer *out);
 
 /* find property `name` on the pointer's type; fills *out */
-bool ujs_prop_find(ujs_pointer owner, const char *name, ujs_prop_desc *out);
+bool ujs_prop_find(const ujs_pointer *owner_in, const char *name, ujs_prop_desc *out);
 
 /* iterate the type's properties: iter==0 starts (returns handle); each next
  * writes one desc and answers true; false = done. free releases it. */
-ujs_iter_t ujs_props_iter(ujs_pointer owner);
+ujs_iter_t ujs_props_iter(const ujs_pointer *owner_in);
 bool ujs_props_next(ujs_iter_t it, ujs_prop_desc *out);
 void ujs_props_iter_free(ujs_iter_t it);
 
 /* ---- typed get. out-params are caller-allocated. ---- */
 
-bool ujs_get_bool(ujs_pointer owner, const char *name, bool *out);
-bool ujs_get_int(ujs_pointer owner, const char *name, int64_t *out);
-bool ujs_get_float(ujs_pointer owner, const char *name, double *out);
-bool ujs_get_string(ujs_pointer owner, const char *name, const char **out);
+bool ujs_get_bool(const ujs_pointer *owner_in, const char *name, bool *out);
+bool ujs_get_int(const ujs_pointer *owner_in, const char *name, int64_t *out);
+bool ujs_get_float(const ujs_pointer *owner_in, const char *name, double *out);
+bool ujs_get_string(const ujs_pointer *owner_in, const char *name, const char **out);
 /* enum: value + the current idname (may be NULL if not wanted) */
-bool ujs_get_enum(ujs_pointer owner, const char *name, int64_t *out, const char **idname_out);
-bool ujs_get_pointer(ujs_pointer owner, const char *name, ujs_pointer *out);
+bool ujs_get_enum(const ujs_pointer *owner_in, const char *name, int64_t *out, const char **idname_out);
+bool ujs_get_pointer(const ujs_pointer *owner_in, const char *name, ujs_pointer *out);
 /* fixed-length float array: out holds array_len doubles */
-bool ujs_get_float_array(ujs_pointer owner, const char *name, double *out, int32_t len);
+bool ujs_get_float_array(const ujs_pointer *owner_in, const char *name, double *out, int32_t len);
 /* dynamic float array: caller frees *out_data with ujs_free (not the caller's
  * own allocator) */
-bool ujs_get_float_array_n(ujs_pointer owner, const char *name, double **out_data, int32_t *out_len);
+bool ujs_get_float_array_n(const ujs_pointer *owner_in, const char *name, double **out_data, int32_t *out_len);
 
 /* ---- typed set ---- */
 
-bool ujs_set_bool(ujs_pointer owner, const char *name, bool v);
-bool ujs_set_int(ujs_pointer owner, const char *name, int64_t v);
-bool ujs_set_float(ujs_pointer owner, const char *name, double v);
-bool ujs_set_string(ujs_pointer owner, const char *name, const char *v);
-bool ujs_set_enum(ujs_pointer owner, const char *name, int64_t v);
-bool ujs_set_pointer(ujs_pointer owner, const char *name, ujs_pointer v);
-bool ujs_set_float_array(ujs_pointer owner, const char *name, const double *v, int32_t len);
+bool ujs_set_bool(const ujs_pointer *owner_in, const char *name, bool v);
+bool ujs_set_int(const ujs_pointer *owner_in, const char *name, int64_t v);
+bool ujs_set_float(const ujs_pointer *owner_in, const char *name, double v);
+bool ujs_set_string(const ujs_pointer *owner_in, const char *name, const char *v);
+bool ujs_set_enum(const ujs_pointer *owner_in, const char *name, int64_t v);
+bool ujs_set_pointer(const ujs_pointer *owner_in, const char *name, const ujs_pointer *v_in);
+bool ujs_set_float_array(const ujs_pointer *owner_in, const char *name, const double *v, int32_t len);
 
 /* ---- collections --- */
 
-bool ujs_coll_len(ujs_pointer owner, const char *name, int64_t *out);
-ujs_iter_t ujs_coll_iter(ujs_pointer owner, const char *name);
+bool ujs_coll_len(const ujs_pointer *owner_in, const char *name, int64_t *out);
+ujs_iter_t ujs_coll_iter(const ujs_pointer *owner_in, const char *name);
 bool ujs_coll_next(ujs_iter_t it, ujs_pointer *out);
 void ujs_coll_iter_free(ujs_iter_t it);
 
@@ -158,21 +160,21 @@ bool ujs_id_new(const char *type_name, const char *name, ujs_pointer *out);
  * a null pointer makes an Empty), its type derived from the data, like
  * bpy.data.objects.new. ujs_id_new("Object", ...) makes an Empty, and an
  * Empty ignores a later data assignment, so data-carrying objects need this. */
-bool ujs_object_new(const char *name, ujs_pointer data, ujs_pointer *out);
+bool ujs_object_new(const char *name, const ujs_pointer *data_in, ujs_pointer *out);
 
 /* Replace `mesh`'s geometry from vertex positions and polygon indices, like
  * bpy's Mesh.from_pydata. `verts` holds nverts xyz triples. `face_offsets`
  * (nfaces+1 int32) are prefix offsets into `face_indices`; polygon i runs
  * [face_offsets[i], face_offsets[i+1]). */
-bool ujs_mesh_from_pydata(ujs_pointer mesh,
+bool ujs_mesh_from_pydata(const ujs_pointer *mesh_in,
                           const double *verts, int32_t nverts,
                           const int32_t *face_offsets, int32_t nfaces,
                           const int32_t *face_indices, int32_t nindices);
 
 /* link/unlink `member` in collection property `name` on `coll` (e.g. the
  * Scene.objects collection). */
-bool ujs_coll_add(ujs_pointer coll, const char *name, ujs_pointer member);
-bool ujs_coll_remove(ujs_pointer coll, const char *name, ujs_pointer member);
+bool ujs_coll_add(const ujs_pointer *coll_in, const char *name, const ujs_pointer *member_in);
+bool ujs_coll_remove(const ujs_pointer *coll_in, const char *name, const ujs_pointer *member_in);
 
 /* ---- operators --------------------------------------------------------------
  *
@@ -195,32 +197,32 @@ bool ujs_operator_call_ex(const char *opname, int32_t n, const char **keys,
  * NodeLinks.new, ObjectModifiers.new) with `n` named arguments. The first
  * output (the return value) goes to *ret (type UJS_VAL_NONE when the
  * function returns nothing). */
-bool ujs_func_call(ujs_pointer self, const char *fname, int32_t n,
+bool ujs_func_call(const ujs_pointer *self_in, const char *fname, int32_t n,
                    const char **names, const ujs_value *args, ujs_value *ret);
 
 /* The collection property's function struct (BlendDataMaterials,
  * NodeLinks, ObjectModifiers, ...), the `self` for ujs_func_call on things
  * like bpy.data.materials.new. Fails when the collection has none. */
-bool ujs_coll_ptr(ujs_pointer owner, const char *name, ujs_pointer *out);
+bool ujs_coll_ptr(const ujs_pointer *owner_in, const char *name, ujs_pointer *out);
 
 /* Set an enum property by identifier ("SUN", "BLENDER_EEVEE"); flag enums
  * take comma-separated identifiers. */
-bool ujs_set_enum_id(ujs_pointer owner, const char *name, const char *ids);
+bool ujs_set_enum_id(const ujs_pointer *owner_in, const char *name, const char *ids);
 
 /* Collection item by string key (`key` non-NULL) or index. */
-bool ujs_coll_lookup(ujs_pointer owner, const char *name, const char *key,
+bool ujs_coll_lookup(const ujs_pointer *owner_in, const char *name, const char *key,
                      int64_t index, ujs_pointer *out);
 
 /* Bulk read/write of attribute `attr` across every item of collection
  * `name` (foreach_get / foreach_set), `len` doubles, item-major. */
-bool ujs_coll_foreach_get(ujs_pointer owner, const char *name, const char *attr,
+bool ujs_coll_foreach_get(const ujs_pointer *owner_in, const char *name, const char *attr,
                           double *buf, int64_t len);
-bool ujs_coll_foreach_set(ujs_pointer owner, const char *name, const char *attr,
+bool ujs_coll_foreach_set(const ujs_pointer *owner_in, const char *name, const char *attr,
                           const double *buf, int64_t len);
 
 /* Int/bool arrays (fixed or dynamic length) as int64. */
-bool ujs_get_int_array(ujs_pointer owner, const char *name, int64_t **out, int32_t *len);
-bool ujs_set_int_array(ujs_pointer owner, const char *name, const int64_t *v, int32_t len);
+bool ujs_get_int_array(const ujs_pointer *owner_in, const char *name, int64_t **out, int32_t *len);
+bool ujs_set_int_array(const ujs_pointer *owner_in, const char *name, const int64_t *v, int32_t len);
 
 /* ---- KX engine (the running game) -------------------------------------------
  *
@@ -241,13 +243,13 @@ bool ujs_kx_object_at(int64_t index, ujs_pointer *out);
 bool ujs_kx_object_find(const char *name, ujs_pointer *out);
 
 /* The object's name (host memory, valid until the next ujs_* call). */
-bool ujs_kx_name(ujs_pointer obj, const char **out);
+bool ujs_kx_name(const ujs_pointer *obj_in, const char **out);
 
 /* World position, as 3 doubles [x y z]. */
-bool ujs_kx_world_position(ujs_pointer obj, double *xyz);
+bool ujs_kx_world_position(const ujs_pointer *obj_in, double *xyz);
 
 /* Set the world position from 3 doubles [x y z]. */
-bool ujs_kx_set_world_position(ujs_pointer obj, const double *xyz);
+bool ujs_kx_set_world_position(const ujs_pointer *obj_in, const double *xyz);
 
 /* ---- test-only hooks (mock shim; never called against a real host) ---- */
 
@@ -274,31 +276,31 @@ bool ujs_kx_running(void);
 bool ujs_kx_end_game(void);
 /* what: "position" "scale" "linear_velocity" "angular_velocity"
  * "local_linear_velocity" "local_angular_velocity" */
-bool ujs_kx_get_vec(ujs_pointer obj, const char *what, double *out);
-bool ujs_kx_set_vec(ujs_pointer obj, const char *what, const double *v);
-bool ujs_kx_get_orientation(ujs_pointer obj, double *m9);
-bool ujs_kx_set_orientation(ujs_pointer obj, const double *m9);
+bool ujs_kx_get_vec(const ujs_pointer *obj_in, const char *what, double *out);
+bool ujs_kx_set_vec(const ujs_pointer *obj_in, const char *what, const double *v);
+bool ujs_kx_get_orientation(const ujs_pointer *obj_in, double *m9);
+bool ujs_kx_set_orientation(const ujs_pointer *obj_in, const double *m9);
 /* what: "force" "torque" "impulse" (impulse applies at world point `at`) */
-bool ujs_kx_apply(ujs_pointer obj, const char *what, const double *v, const double *at, bool local);
-bool ujs_kx_get_mass(ujs_pointer obj, double *out);
-bool ujs_kx_set_mass(ujs_pointer obj, double mass);
-bool ujs_kx_set_damping(ujs_pointer obj, double linear, double angular);
-bool ujs_kx_suspend_dynamics(ujs_pointer obj, bool suspend);
+bool ujs_kx_apply(const ujs_pointer *obj_in, const char *what, const double *v, const double *at, bool local);
+bool ujs_kx_get_mass(const ujs_pointer *obj_in, double *out);
+bool ujs_kx_set_mass(const ujs_pointer *obj_in, double mass);
+bool ujs_kx_set_damping(const ujs_pointer *obj_in, double linear, double angular);
+bool ujs_kx_suspend_dynamics(const ujs_pointer *obj_in, bool suspend);
 /* first hit from `from` to `to`, skipping `ignore` (may be null) */
-bool ujs_kx_raycast(const double *from, const double *to, ujs_pointer ignore,
+bool ujs_kx_raycast(const double *from, const double *to, const ujs_pointer *ignore_in,
                     ujs_pointer *hit, double *point, double *normal);
-bool ujs_kx_get_parent(ujs_pointer obj, ujs_pointer *out);
-bool ujs_kx_set_parent(ujs_pointer obj, ujs_pointer parent); /* null parent = remove */
+bool ujs_kx_get_parent(const ujs_pointer *obj_in, ujs_pointer *out);
+bool ujs_kx_set_parent(const ujs_pointer *obj_in, const ujs_pointer *parent_in); /* null parent = remove */
 /* spawn a copy of object `name` (an inactive/hidden object, or an active one)
  * at `at`'s transform (null = the original's), living `lifespan` seconds (0 = forever) */
-bool ujs_kx_spawn(const char *name, ujs_pointer at, double lifespan, ujs_pointer *out);
-bool ujs_kx_remove(ujs_pointer obj);
-bool ujs_kx_set_camera(ujs_pointer cam);
-bool ujs_kx_set_visible(ujs_pointer obj, bool visible, bool recursive);
+bool ujs_kx_spawn(const char *name, const ujs_pointer *at_in, double lifespan, ujs_pointer *out);
+bool ujs_kx_remove(const ujs_pointer *obj_in);
+bool ujs_kx_set_camera(const ujs_pointer *cam_in);
+bool ujs_kx_set_visible(const ujs_pointer *obj_in, bool visible, bool recursive);
 /* the Blender Object an engine object was converted from, as an RNA pointer:
  * lights, materials and other datablocks are then reachable through the RNA
  * bridge while the game runs */
-bool ujs_kx_blender_object(ujs_pointer obj, ujs_pointer *out);
+bool ujs_kx_blender_object(const ujs_pointer *obj_in, ujs_pointer *out);
 /* input by bge event name ("WKEY", "LEFTSHIFTKEY", "LEFTMOUSE", ...):
  * bit 1 = active, 2 = just activated, 4 = just released */
 bool ujs_kx_input(const char *name, int32_t *status);
@@ -325,7 +327,7 @@ bool ujs_kx_canvas_size(int32_t *w, int32_t *h);
  * Audio: sounds and handles are opaque heap objects, freed with
  * ujs_snd_free / ujs_snd_handle_free; playback goes to Blender's device. */
 
-bool ujs_kx_set_text(ujs_pointer obj, const char *text);
+bool ujs_kx_set_text(const ujs_pointer *obj_in, const char *text);
 bool ujs_kx_add_filter(int32_t index, int32_t type, const char *glsl);
 bool ujs_kx_remove_filter(int32_t index);
 bool ujs_kx_filter_uniform(int32_t index, const char *name, const double *v, int32_t n);
