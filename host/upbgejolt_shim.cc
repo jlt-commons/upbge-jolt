@@ -92,6 +92,7 @@
 #include "KX_RayCast.h"
 #include "PHY_IPhysicsController.h"
 #include "RAS_ICanvas.h"
+#include "GHOST_ISystem.hh"
 #include "SCA_IInputDevice.h"
 #include "SCA_InputEvent.h"
 #include "MT_Vector3.h"
@@ -1225,11 +1226,23 @@ extern "C" bool ujs_kx_mouse(double *xy)
   return true;
 }
 
-extern "C" bool ujs_kx_set_mouse(double x, double y)
+extern "C" bool ujs_kx_set_mouse(double x, double y, bool *applied)
 {
   RAS_ICanvas *canvas = kx_canvas();
   if (canvas == nullptr) return false;
-  canvas->SetMousePosition((int)(x * canvas->GetWidth()), (int)(y * canvas->GetHeight()));
+  const int tx = (int)(x * canvas->GetWidth());
+  const int ty = (int)(y * canvas->GetHeight());
+  canvas->SetMousePosition(tx, ty);
+  /* The warp is silently ignored while the window is not the active one:
+   * read the real cursor back to say whether it took effect. */
+  *applied = false;
+  GHOST_ISystem *system = GHOST_ISystem::getSystem();
+  int32_t sx, sy;
+  if (system != nullptr && system->getCursorPosition(sx, sy) == GHOST_kSuccess) {
+    int cx, cy;
+    canvas->ConvertMousePosition(sx, sy, cx, cy, true);
+    *applied = std::abs(cx - tx) <= 2 && std::abs(cy - ty) <= 2;
+  }
   return true;
 }
 
@@ -1238,6 +1251,28 @@ extern "C" bool ujs_kx_show_mouse(bool visible)
   RAS_ICanvas *canvas = kx_canvas();
   if (canvas == nullptr) return false;
   canvas->SetMouseState(visible ? RAS_ICanvas::MOUSE_NORMAL : RAS_ICanvas::MOUSE_INVISIBLE);
+  return true;
+}
+
+extern "C" bool ujs_kx_pointer_lock(bool lock)
+{
+  KX_KetsjiEngine *engine = KX_GetActiveEngine();
+  bContext *C = (engine != nullptr && kx_scene() != nullptr) ? engine->GetContext() : ctx();
+  if (lock && kx_scene() == nullptr) {
+    set_err("no game running");
+    return false;
+  }
+  wmWindow *win = C ? CTX_wm_window(C) : nullptr;
+  if (win == nullptr) {
+    set_err("no window to lock the pointer in");
+    return false;
+  }
+  if (lock) {
+    WM_cursor_grab_enable(win, WM_CURSOR_WRAP_XY, nullptr, true);
+  }
+  else {
+    WM_cursor_grab_disable(win, nullptr);
+  }
   return true;
 }
 

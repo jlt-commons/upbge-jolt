@@ -135,6 +135,8 @@
 
 (defn- game-ended! []
   (swap! state assoc :running? false :frame {})
+  ;; never leave the editor with a hidden, grabbed cursor from mouse look
+  (try (b/kx-pointer-lock! false) (catch Throwable t (report! :stop :pointer-lock t)))
   (run-each! :stop (:stop @state)))
 
 (defn- step!

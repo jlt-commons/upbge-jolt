@@ -58,3 +58,14 @@
     (is (= 3 @ok) "other handlers keep running")
     (is (= [:bad] (mapv :key (game/errors))) "the failure is recorded once")
     (is (= "boom" (:message (first (game/errors)))))))
+
+(ffi/defcfn pointer-locked? "ujs_test_pointer_locked" [] :bool)
+(ffi/defcfn lock-pointer! "ujs_kx_pointer_lock" [:bool] :bool)
+
+(deftest pointer-released-when-game-ends
+  (testing "a game that locked the pointer and never released it does not leave the editor locked"
+    (set-running! true) (tick-n 1)
+    (lock-pointer! true)
+    (is (pointer-locked?))
+    (set-running! false) (tick-n 1)
+    (is (not (pointer-locked?)))))

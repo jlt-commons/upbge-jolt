@@ -92,8 +92,15 @@ Input uses bge event names: `"WKEY"`, `"LEFTSHIFTKEY"`, `"SPACEKEY"`,
 (bge/mouse! 0.5 0.5)               ; recenter each frame for mouse look
 ```
 
-Mouse look: read `(bge/mouse)`, take the offset from `[0.5 0.5]` as the
-delta, rotate, then `(bge/mouse! 0.5 0.5)`.
+Mouse look: call `(bge/mouse-look)` once per frame. It returns this frame's
+movement `[dx dy]`, normalised to the window size. On first use it locks the
+pointer, which hides and grabs it: Blender wraps the cursor at the window
+edges and keeps positions continuous, so differences between frames are pure
+mouse motion and a still mouse always reads zero. `(bge/release-mouse-look!)`
+releases it (bind it to Esc), the next call re-locks, and the lock is always
+released when the game ends. Warping the cursor to the centre by hand
+(`bge/mouse!`) is unreliable: the warp is ignored while the window isn't
+focused, and the new position only reads back on the next frame.
 
 HUD and capture:
 

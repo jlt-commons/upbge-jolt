@@ -884,8 +884,9 @@
 (ffi/defcfn ujs-kx-blender-object "ujs_kx_blender_object" [:pointer :pointer] :bool)
 (ffi/defcfn ujs-kx-input "ujs_kx_input" [:string :pointer] :bool)
 (ffi/defcfn ujs-kx-mouse "ujs_kx_mouse" [:pointer] :bool)
-(ffi/defcfn ujs-kx-set-mouse "ujs_kx_set_mouse" [:double :double] :bool)
+(ffi/defcfn ujs-kx-set-mouse "ujs_kx_set_mouse" [:double :double :pointer] :bool)
 (ffi/defcfn ujs-kx-show-mouse "ujs_kx_show_mouse" [:bool] :bool)
+(ffi/defcfn ujs-kx-pointer-lock "ujs_kx_pointer_lock" [:bool] :bool)
 (ffi/defcfn ujs-kx-screenshot "ujs_kx_screenshot" [:string] :bool)
 (ffi/defcfn ujs-kx-frame-info "ujs_kx_frame_info" [:pointer] :bool)
 (ffi/defcfn ujs-kx-canvas-size "ujs_kx_canvas_size" [:pointer :pointer] :bool)
@@ -1066,11 +1067,25 @@
      (try (if (ujs-kx-mouse out) (read-doubles out 2) (host-error "mouse"))
           (finally (ffi/free out))))))
 
-(defn kx-set-mouse! [x y]
-  (on-host (or (ujs-kx-set-mouse (double x) (double y)) (host-error "mouse"))))
+(defn kx-set-mouse!
+  "Warp the mouse to normalized [x y]; true when the warp took effect (the
+  host ignores it while the game window is not active)."
+  [x y]
+  (on-host
+   (let [out (ffi/alloc 1)]
+     (try
+       (if (ujs-kx-set-mouse (double x) (double y) out)
+         (not= 0 (ffi/read out :uint8))
+         (host-error "mouse"))
+       (finally (ffi/free out))))))
 
 (defn kx-show-mouse! [visible?]
   (on-host (or (ujs-kx-show-mouse (boolean visible?)) (host-error "mouse"))))
+
+(defn kx-pointer-lock!
+  "Lock (hide and grab) or release the pointer for mouse look."
+  [lock?]
+  (on-host (or (ujs-kx-pointer-lock (boolean lock?)) (host-error "pointer lock"))))
 
 (defn kx-screenshot!
   "Save the game canvas to `path` (PNG)."

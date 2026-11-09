@@ -303,8 +303,15 @@ bool ujs_kx_blender_object(ujs_pointer obj, ujs_pointer *out);
  * bit 1 = active, 2 = just activated, 4 = just released */
 bool ujs_kx_input(const char *name, int32_t *status);
 bool ujs_kx_mouse(double *xy);            /* normalized 0..1 */
-bool ujs_kx_set_mouse(double x, double y); /* normalized */
+/* normalized; *applied says whether the warp took effect (it is ignored
+ * while the game window is not the active window) */
+bool ujs_kx_set_mouse(double x, double y, bool *applied);
 bool ujs_kx_show_mouse(bool visible);
+/* Pointer lock for mouse look: hide the cursor and grab it, so mouse
+ * positions keep moving past the window edges (the host wraps the cursor
+ * and accumulates the offset) and per-frame differences are pure mouse
+ * motion. Locking needs a running game; unlocking works any time. */
+bool ujs_kx_pointer_lock(bool lock);
 bool ujs_kx_screenshot(const char *path);
 /* [average fps, engine clock seconds, last frame timestep] */
 bool ujs_kx_frame_info(double *out3);

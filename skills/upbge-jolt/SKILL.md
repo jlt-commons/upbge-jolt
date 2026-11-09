@@ -110,8 +110,11 @@ In `main.clj`:
   a player capsule.
 - Buoyancy: `(bge/impulse! boat [0 0 f] point)` at sample points, using
   the same wave function as the shader.
-- Mouse look: read `(bge/mouse)`, take the offset from 0.5 as the delta,
-  then call `(bge/mouse! 0.5 0.5)` and `(bge/show-mouse! false)`.
+- Mouse look: call `(bge/mouse-look)` once per frame. It returns `[dx dy]`
+  and locks (hides and grabs) the pointer on first use, so a still mouse
+  reads zero. `(bge/release-mouse-look!)` releases it (Esc), and the next
+  call re-locks. Don't hand-roll warp-to-centre: warps are ignored when the
+  window isn't focused, and read back a frame late.
 - Riding a moving vehicle: `(bge/parent! player boat)`.
 - Walking: `(bge/raycast from to player)` returns `{:object :point :normal}`
   or nil.

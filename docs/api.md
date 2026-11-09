@@ -490,9 +490,18 @@ Mouse position, normalized [x y] in 0..1.
 
 `(kx-set-mouse! x y)`
 
+Warp the mouse to normalized [x y]; true when the warp took effect (the
+host ignores it while the game window is not active).
+
 ### `kx-show-mouse!`
 
 `(kx-show-mouse! visible?)`
+
+### `kx-pointer-lock!`
+
+`(kx-pointer-lock! lock?)`
+
+Lock (hide and grab) or release the pointer for mouse look.
 
 ### `kx-screenshot!`
 
@@ -957,8 +966,46 @@ Normalized mouse position [x y] (0..1, origin top-left).
 
 `(mouse! x y)`
 
-Warp the mouse to normalized [x y] (centering it each frame gives
-pointer-lock style mouse look).
+Warp the mouse to normalized [x y]. Returns whether the warp took effect:
+the host ignores it when the game window is not the active window. The
+new position is read back from the next frame on. For mouse look use
+`mouse-look`, which handles both.
+
+### `mouse-look-step`
+
+`(mouse-look-step st pos warped?)`
+
+Pure mouse-look transition. `st` is the previous state (nil at first),
+`pos` this frame's normalized mouse position, `warped?` whether the warp
+to the centre issued after reading it took effect. Returns [st' [dx dy]]:
+movement since last frame, measured from where the cursor was last put
+(the centre after a warp that took effect, else where it was), so a still
+mouse reads zero whether or not the window holds the cursor.
+
+### `pointer-lock!`
+
+`(pointer-lock! lock?)`
+
+Lock (hide and grab) or release the pointer. While locked, mouse
+positions keep moving past the window edges, so differences between
+frames are pure mouse motion. Released automatically when the game ends.
+
+### `mouse-look`
+
+`(mouse-look)`
+
+Mouse movement this frame as normalized [dx dy] (x right, y down), for
+first-person look. Call once per frame from a game/on-frame! handler. The
+first call locks the pointer (`pointer-lock!`); release it with
+(pointer-lock! false) (Esc, menus), and the next call locks it again. A
+still mouse always reads [0 0].
+
+### `release-mouse-look!`
+
+`(release-mouse-look!)`
+
+Release the pointer (show the cursor); mouse-look re-locks on its next
+call.
 
 ### `show-mouse!`
 

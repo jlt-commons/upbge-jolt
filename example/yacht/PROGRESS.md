@@ -78,7 +78,7 @@ Task: `example/PROMPT.md`. Work is done live over nREPL (see
   gains will need fewer noise octaves, simpler bump, or a smaller world-space
   LOD, not fewer vertices. Measure over at least 25 s after any change:
   shader recompiles skew the average and the intro camera changes the cost.
-- Mouse warp (`bge/mouse!`) didn't take effect when the game window lacked the
+- Mouse look now uses `bge/mouse-look` (pointer lock), which replaced the warp-based code that spun.
   cursor, which made mouse look spin. main.clj guards against it; a person
   needs to confirm in an interactive play session.
 - Setting materials one polygon at a time is very slow; use bulk

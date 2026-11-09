@@ -193,10 +193,60 @@
   (b/kx-mouse))
 
 (defn mouse!
-  "Warp the mouse to normalized [x y] (centering it each frame gives
-  pointer-lock style mouse look)."
+  "Warp the mouse to normalized [x y]. Returns whether the warp took effect:
+  the host ignores it when the game window is not the active window. The
+  new position is read back from the next frame on. For mouse look use
+  `mouse-look`, which handles both."
   [x y]
   (b/kx-set-mouse! x y))
+
+(defn mouse-look-step
+  "Pure mouse-look transition. `st` is the previous state (nil at first),
+  `pos` this frame's normalized mouse position, `warped?` whether the warp
+  to the centre issued after reading it took effect. Returns [st' [dx dy]]:
+  movement since last frame, measured from where the cursor was last put
+  (the centre after a warp that took effect, else where it was), so a still
+  mouse reads zero whether or not the window holds the cursor."
+  [st pos warped?]
+  (let [[x y] pos
+        delta (if-let [[rx ry] (:ref st)]
+                [(- (double x) rx) (- (double y) ry)]
+                [0.0 0.0])]
+    [{:ref (if warped? [0.5 0.5] [(double x) (double y)])} delta]))
+
+(declare frame-info)
+
+(def ^:private mouse-look-state (atom nil))
+
+(defn pointer-lock!
+  "Lock (hide and grab) or release the pointer. While locked, mouse
+  positions keep moving past the window edges, so differences between
+  frames are pure mouse motion. Released automatically when the game ends."
+  [lock?]
+  (b/kx-pointer-lock! lock?))
+
+(defn mouse-look
+  "Mouse movement this frame as normalized [dx dy] (x right, y down), for
+  first-person look. Call once per frame from a game/on-frame! handler. The
+  first call locks the pointer (`pointer-lock!`); release it with
+  (pointer-lock! false) (Esc, menus), and the next call locks it again. A
+  still mouse always reads [0 0]."
+  []
+  (let [clock (:clock (frame-info))
+        st @mouse-look-state
+        ;; a new game run restarts the engine clock: start fresh
+        st (when (and st (<= (:clock st) clock)) st)
+        st (if (:locked st) st (do (pointer-lock! true) nil))
+        [st' delta] (mouse-look-step st (mouse) false)]
+    (reset! mouse-look-state (assoc st' :clock clock :locked true))
+    delta))
+
+(defn release-mouse-look!
+  "Release the pointer (show the cursor); mouse-look re-locks on its next
+  call."
+  []
+  (swap! mouse-look-state assoc :locked false)
+  (pointer-lock! false))
 
 (defn show-mouse!
   [visible?]

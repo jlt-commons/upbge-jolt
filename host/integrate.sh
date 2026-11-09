@@ -49,6 +49,7 @@ set(INC
   ../draw/intern
   ../gpu
   ../gpu/intern
+  ../../../intern/ghost
   ../../../intern/guardedalloc
   ../../../intern/termcolor
   ${PYTHON_INCLUDE_DIR}

@@ -378,36 +378,13 @@
 
 (defn wrap-pi [a] (- (mod (+ (double a) PI) (* 2.0 PI)) PI))
 
-(def ^:private mouse-deadzone 0.0025)
-(def ^:private mouse-state (atom {:last nil}))
-
 (defn mouse-look-delta
-  "Normalised mouse movement since the last frame, with a small deadzone.
-
-  Tries to recentre the cursor after reading. If the host ignores the warp
-  (an embedded window that does not hold the cursor), the reads stay at a
-  fixed off-centre position; using raw position deltas then makes the view
-  hold still instead of spinning forever. When the warp does work, the
-  recentred position is the next frame's baseline."
+  "Normalised mouse movement this frame. bge/mouse-look locks the pointer
+  (hidden, grabbed) on first use, so a still mouse reads zero and the view
+  never spins; clamped so a long frame cannot snap the view."
   []
-  (let [m (bge/mouse)
-        mx (double (nth m 0)) my (double (nth m 1))
-        inside (and (>= mx 0.02) (<= mx 0.98) (>= my 0.02) (<= my 0.98))]
-    (if-not inside
-      (do (swap! mouse-state assoc :last nil) [0.0 0.0])
-      (let [last (:last @mouse-state)
-            dx0 (- mx (if last (double (nth last 0)) mx))
-            dy0 (- my (if last (double (nth last 1)) my))
-            dx (if (< (Math/abs dx0) mouse-deadzone) 0.0 dx0)
-            dy (if (< (Math/abs dy0) mouse-deadzone) 0.0 dy0)
-            _ (bge/mouse! 0.5 0.5)
-            am (bge/mouse)
-            ax (double (nth am 0)) ay (double (nth am 1))
-            warped (and (< (Math/abs (- ax 0.5)) 0.08)
-                        (< (Math/abs (- ay 0.5)) 0.08))]
-        ;; Offset the recentre bias so a still mouse reads as zero movement.
-        (swap! mouse-state assoc :last (if warped [ax ay] [mx my]))
-        [(clamp dx -0.10 0.10) (clamp dy -0.10 0.10)]))))
+  (let [[dx dy] (bge/mouse-look)]
+    [(clamp dx -0.2 0.2) (clamp dy -0.2 0.2)]))
 
 (defn update-look! [dt]
   (let [{:keys [mode look]} @S]
@@ -701,9 +678,7 @@
     (start-audio!))
   (when (and (= (:mode @S) :intro)
              (some bge/key-pressed? ["WKEY" "AKEY" "SKEY" "DKEY" "EKEY" "CKEY" "OKEY" "TKEY" "F1KEY" "HKEY" "PKEY" "SPACEKEY" "LEFTMOUSE" "ESCKEY"]))
-    (swap! S assoc :mode :walk :player {:pos start-pos :yaw start-yaw :pitch 0.0} :look true)
-    (bge/show-mouse! false)
-    (bge/mouse! 0.5 0.5))
+    (swap! S assoc :mode :walk :player {:pos start-pos :yaw start-yaw :pitch 0.0} :look true))
   (when (and (not= (:mode @S) :intro) (bge/key-pressed? "EKEY") (:driving @S))
     (swap! S assoc :driving false :throttle 0.0 :mode :walk)
     (msg! "Wheel released"))
@@ -735,12 +710,10 @@
     (try (bge/screenshot! "/Users/yogthos/src/jlt-commons/upbge-jolt/example/yacht/shot-user.png")
          (msg! "Screenshot saved") (catch Exception _ nil)))
   (when (bge/key-pressed? "LEFTMOUSE")
-    (swap! S assoc :look true)
-    (bge/show-mouse! false)
-    (bge/mouse! 0.5 0.5))
+    (swap! S assoc :look true))          ; mouse-look re-locks the pointer
   (when (bge/key-pressed? "ESCKEY")
     (swap! S assoc :look false)
-    (bge/show-mouse! true))
+    (bge/release-mouse-look!))
   ;; driving throttle/steer
   (when (:driving @S)
     (let [thr (:throttle (:yacht @S))

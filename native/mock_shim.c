@@ -880,3 +880,16 @@ void ujs_test_handle_state(void *handle, double *out3) {
 static int64_t g_generation = 1;
 const int64_t *ujs_generation_ptr(void) { return &g_generation; }
 void ujs_test_bump_generation(void) { g_generation++; }
+
+/* --- pointer lock (mouse look) ---------------------------------------------- */
+
+static bool g_pointer_locked = false;
+
+bool ujs_kx_pointer_lock(bool lock) {
+  if (lock && !g_kx_running) { set_err("no game running"); return false; }
+  g_pointer_locked = lock;
+  return true;
+}
+
+/* test hook */
+bool ujs_test_pointer_locked(void) { return g_pointer_locked; }
