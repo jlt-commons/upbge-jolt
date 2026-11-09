@@ -239,15 +239,17 @@
 ;; init
 ;; ---------------------------------------------------------------------------
 
-(defn cache-ocean! []
+(defn cache-ocean!
+  "The ocean shader reads wave time from the Ocean object's color.r and the
+  hull mask from an empty named Y-WaveParams: its transform is the yacht's
+  transform, so the shader's Object texture coordinates are the hull-local
+  coordinates the mask needs. Both are cheap per-frame updates; nothing
+  invalidates the compiled ocean material."
+  []
   (try
-    (let [mat (b/lookup (bpy/data) "materials" "Ocean")
-          nt (nodes/tree mat)
-          sock (fn [n] (when-let [nd (nodes/find nt n)] (nodes/socket nd :out 0)))]
-      (swap! R assoc
-             :ocean-time (sock "time")
-             :mask-x (sock "YachtX") :mask-y (sock "YachtY")
-             :mask-z (sock "YachtZ") :mask-yaw (sock "YachtYaw")))
+    (swap! R assoc
+           :ocean (bge/blender-object (bge/object "Ocean"))
+           :wave-params (bge/object "Y-WaveParams"))
     (catch Exception e nil)))
 
 (defn init! []
@@ -345,13 +347,17 @@
     (when-let [root (:root @R)]
       (bge/move! root pos')
       (bge/orient! root (bge/euler->matrix [pitch roll yaw'])))
-    (when-let [s (:ocean-time (deref R))]
-      (b/set! s "default_value" (double (:t @S))))
-    (when-let [s (:mask-x (deref R))]
-      (b/set! s "default_value" (double (nth pos' 0)))
-      (b/set! (:mask-y (deref R)) "default_value" (double (nth pos' 1)))
-      (b/set! (:mask-z (deref R)) "default_value" (double (nth pos' 2)))
-      (b/set! (:mask-yaw (deref R)) "default_value" (- (double yaw'))))))
+    ;; Cheap per-frame uniforms: wave time via the Ocean object's color,
+    ;; hull mask via the Y-WaveParams empty's transform. Neither regenerates
+    ;; the ocean material.
+    (when-let [o (:ocean (deref R))]
+      (try (b/set! o "color" [(double (:t @S)) 0.0 0.0 1.0])
+           (catch Exception _ nil)))
+    (when-let [wp (:wave-params (deref R))]
+      (try
+        (bge/move! wp pos')
+        (bge/orient! wp (bge/euler->matrix [0.0 0.0 (- (double yaw'))]))
+        (catch Exception _ nil)))))
 
 ;; ---------------------------------------------------------------------------
 ;; player
