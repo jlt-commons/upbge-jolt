@@ -4,9 +4,8 @@
 
   A game's jolt code lives in a Text datablock named \"main.clj\" inside the
   .blend, so saving the scene saves its logic. When a game starts (from the
-  viewport, the REPL, or `blender file.blend --python
-  host/upbge_jolt_bootstrap_game.py`), main.clj is evaluated before the first
-  frame's handlers run. Develop it at the REPL, then store it with
+  viewport, the REPL, `host/play.sh`, or a release), main.clj is evaluated
+  before the first frame's handlers run. Develop it at the REPL, then store it with
   `set-main!` (or `set-main-file!`) and save the file.
 
   Handlers registered with `on-frame!` run every game frame on the host

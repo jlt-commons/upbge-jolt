@@ -1,7 +1,7 @@
 (ns upbge-jolt.boot
   "Host startup, called by the C++ hook (uj_host_start, through the uj_boot
-  export) once the runtime and the nREPL server are up. Replaces the old
-  Python bootstraps. Modes come from UPBGE_JOLT:
+  export) once the runtime and the nREPL server are up. Modes come from
+  UPBGE_JOLT:
 
     editor    the live viewport: EEVEE Rendered through the scene camera
               (UPBGE_JOLT_VIEW = RENDERED, MATERIAL, SOLID or KEEP)

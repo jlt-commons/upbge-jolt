@@ -2,8 +2,8 @@
  * UPBGE/Blender process, initializes the jolt runtime, starts the nREPL
  * server, and points the shim's root at the active scene.
  *
- * Two `extern "C"` entry points are exposed on the blender binary (so a
- * Python bootstrap can reach them via ctypes.CDLL(None)):
+ * `extern "C"` entry points, called from the hooks integrate.sh adds to
+ * Blender's main, the game loop and the player:
  *
  *   int uj_host_init()  -- dlopen + jolt_library_init + set root + start the
  *                          nREPL server; returns the bound port, or -1.
