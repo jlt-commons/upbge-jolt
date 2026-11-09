@@ -1,8 +1,7 @@
 # upbge-jolt
 
 A live, editor-connectable scripting environment for the UPBGE/Blender game
-engine, meant to replace the Python/JavaScript APIs. The REPL is jolt, which
-is Clojure on Chez Scheme with no JVM involved.
+engine with a [Jolt](https://jolt-lang.net/) nREPL replacing the Python/JavaScript APIs.
 
 Connect CIDER/Calva/Cursive to the port in `.nrepl-port`, and evaluate
 against the running editor or game:
@@ -113,34 +112,6 @@ Two directions of calling:
   host they resolve from the host process, where the shim is compiled into
   the UPBGE binary with exported symbols. In tests they resolve from the
   mock shim dylib declared in `:jolt/native`. Same jolt code either way.
-
-## Layout
-
-- `src/upbge_jolt/core.clj`: op queue, tick, eval-string, nREPL lifecycle.
-  Loadable with no host present.
-- `src/upbge_jolt/bridge.clj`: typed RNA property access over `ujs_*`,
-  covering scalars, fixed and dynamic float arrays, enums, pointers and
-  collections.
-- `src/upbge_jolt/library.clj`: the `ffi/export!` surface for
-  `jolt build --library`, with `uj_tick`, `uj_start_repl`, `uj_stop_repl`,
-  `uj_eval` and `uj_ping`.
-- `native/upbge_shim.h`: the C ABI contract both shims implement.
-- `native/mock_shim.c`: mock host for headless tests, covering
-  Scene/Cube/Lamp/Mesh.
-- `host/harness.c`: C harness proving the embedding contract end to end.
-- `host/upbgejolt_shim.cc`: the real shim over RNA, for the Blender 4.x
-  API.
-- `host/upbge_jolt.cc`: host integration. `uj_host_start` is the startup
-  hook in Blender's main, starting the runtime, the nREPL server, the port
-  file and the WM-timer pump. Also `uj_host_tick`, `uj_host_game_tick` and
-  `uj_host_init_player`. No Python.
-- `src/upbge_jolt/boot.clj`: the jolt side of startup, with the live view,
-  game start in play mode and the slow-viewport watchdog.
-- `host/run.sh`: the `editor | play | headless` launcher. `host/play.sh`
-  plays a file and `host/release.sh` packages a game.
-- `host/integrate.sh`: drops the shim and integration into a cloned UPBGE
-  tree, applies the build fixes, configures and builds.
-- `test/`: clojure.test suites and a runner.
 
 ## Tasks
 
