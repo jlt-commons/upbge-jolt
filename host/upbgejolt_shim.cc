@@ -247,8 +247,9 @@ static void desc_of(PointerRNA &ptr, PropertyRNA *prop, ujs_prop_desc *out)
   }
 }
 
-extern "C" bool ujs_prop_find(ujs_pointer owner, const char *name, ujs_prop_desc *out)
+extern "C" bool ujs_prop_find(const ujs_pointer *owner_in, const char *name, ujs_prop_desc *out)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop(owner, name);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -266,8 +267,9 @@ struct props_iter {
   int idx;
 };
 
-extern "C" ujs_iter_t ujs_props_iter(ujs_pointer owner)
+extern "C" ujs_iter_t ujs_props_iter(const ujs_pointer *owner_in)
 {
+  ujs_pointer owner = *owner_in;
   PointerRNA ptr = as_rna(owner);
   if (ptr.type == nullptr) return 0;
   /* new, not calloc: PointerRNA holds a Vector, so its members must be
@@ -319,8 +321,9 @@ extern "C" void ujs_props_iter_free(ujs_iter_t h)
 
 /* ---- typed get --------------------------------------------------------------- */
 
-extern "C" bool ujs_get_bool(ujs_pointer owner, const char *name, bool *out)
+extern "C" bool ujs_get_bool(const ujs_pointer *owner_in, const char *name, bool *out)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_BOOLEAN);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -328,8 +331,9 @@ extern "C" bool ujs_get_bool(ujs_pointer owner, const char *name, bool *out)
   return true;
 }
 
-extern "C" bool ujs_get_int(ujs_pointer owner, const char *name, int64_t *out)
+extern "C" bool ujs_get_int(const ujs_pointer *owner_in, const char *name, int64_t *out)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_INT);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -337,8 +341,9 @@ extern "C" bool ujs_get_int(ujs_pointer owner, const char *name, int64_t *out)
   return true;
 }
 
-extern "C" bool ujs_get_float(ujs_pointer owner, const char *name, double *out)
+extern "C" bool ujs_get_float(const ujs_pointer *owner_in, const char *name, double *out)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_FLOAT);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -350,8 +355,9 @@ extern "C" bool ujs_get_float(ujs_pointer owner, const char *name, double *out)
   return true;
 }
 
-extern "C" bool ujs_get_string(ujs_pointer owner, const char *name, const char **out)
+extern "C" bool ujs_get_string(const ujs_pointer *owner_in, const char *name, const char **out)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_STRING);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -360,8 +366,9 @@ extern "C" bool ujs_get_string(ujs_pointer owner, const char *name, const char *
   return true;
 }
 
-extern "C" bool ujs_get_enum(ujs_pointer owner, const char *name, int64_t *out, const char **idname_out)
+extern "C" bool ujs_get_enum(const ujs_pointer *owner_in, const char *name, int64_t *out, const char **idname_out)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_ENUM);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -380,8 +387,9 @@ extern "C" bool ujs_get_enum(ujs_pointer owner, const char *name, int64_t *out, 
   return true;
 }
 
-extern "C" bool ujs_get_pointer(ujs_pointer owner, const char *name, ujs_pointer *out)
+extern "C" bool ujs_get_pointer(const ujs_pointer *owner_in, const char *name, ujs_pointer *out)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_POINTER);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -398,8 +406,9 @@ extern "C" bool ujs_get_pointer(ujs_pointer owner, const char *name, ujs_pointer
 
 /* RNA floats are 32-bit; jolt gets doubles. Small arrays go through a stack
  * buffer, large ones a malloc. */
-extern "C" bool ujs_get_float_array(ujs_pointer owner, const char *name, double *out, int32_t len)
+extern "C" bool ujs_get_float_array(const ujs_pointer *owner_in, const char *name, double *out, int32_t len)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_FLOAT);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -420,8 +429,9 @@ extern "C" bool ujs_get_float_array(ujs_pointer owner, const char *name, double 
   return true;
 }
 
-extern "C" bool ujs_get_float_array_n(ujs_pointer owner, const char *name, double **out_data, int32_t *out_len)
+extern "C" bool ujs_get_float_array_n(const ujs_pointer *owner_in, const char *name, double **out_data, int32_t *out_len)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_FLOAT);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -445,8 +455,9 @@ extern "C" bool ujs_get_float_array_n(ujs_pointer owner, const char *name, doubl
  * Every write runs the property's RNA update (prop_updated), the same path
  * bpy takes, so dependents re-evaluate and editors redraw. */
 
-extern "C" bool ujs_set_bool(ujs_pointer owner, const char *name, bool v)
+extern "C" bool ujs_set_bool(const ujs_pointer *owner_in, const char *name, bool v)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_BOOLEAN);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -455,8 +466,9 @@ extern "C" bool ujs_set_bool(ujs_pointer owner, const char *name, bool v)
   return true;
 }
 
-extern "C" bool ujs_set_int(ujs_pointer owner, const char *name, int64_t v)
+extern "C" bool ujs_set_int(const ujs_pointer *owner_in, const char *name, int64_t v)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_INT);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -465,8 +477,9 @@ extern "C" bool ujs_set_int(ujs_pointer owner, const char *name, int64_t v)
   return true;
 }
 
-extern "C" bool ujs_set_float(ujs_pointer owner, const char *name, double v)
+extern "C" bool ujs_set_float(const ujs_pointer *owner_in, const char *name, double v)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_FLOAT);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -479,8 +492,9 @@ extern "C" bool ujs_set_float(ujs_pointer owner, const char *name, double v)
   return true;
 }
 
-extern "C" bool ujs_set_string(ujs_pointer owner, const char *name, const char *v)
+extern "C" bool ujs_set_string(const ujs_pointer *owner_in, const char *name, const char *v)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_STRING);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -489,8 +503,9 @@ extern "C" bool ujs_set_string(ujs_pointer owner, const char *name, const char *
   return true;
 }
 
-extern "C" bool ujs_set_enum(ujs_pointer owner, const char *name, int64_t v)
+extern "C" bool ujs_set_enum(const ujs_pointer *owner_in, const char *name, int64_t v)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_ENUM);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -499,8 +514,10 @@ extern "C" bool ujs_set_enum(ujs_pointer owner, const char *name, int64_t v)
   return true;
 }
 
-extern "C" bool ujs_set_pointer(ujs_pointer owner, const char *name, ujs_pointer v)
+extern "C" bool ujs_set_pointer(const ujs_pointer *owner_in, const char *name, const ujs_pointer *v_in)
 {
+  ujs_pointer owner = *owner_in;
+  ujs_pointer v = *v_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_POINTER);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -510,8 +527,9 @@ extern "C" bool ujs_set_pointer(ujs_pointer owner, const char *name, ujs_pointer
   return true;
 }
 
-extern "C" bool ujs_set_float_array(ujs_pointer owner, const char *name, const double *v, int32_t len)
+extern "C" bool ujs_set_float_array(const ujs_pointer *owner_in, const char *name, const double *v, int32_t len)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_FLOAT);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -534,8 +552,9 @@ extern "C" bool ujs_set_float_array(ujs_pointer owner, const char *name, const d
 
 /* ---- collections ------------------------------------------------------------------ */
 
-extern "C" bool ujs_coll_len(ujs_pointer owner, const char *name, int64_t *out)
+extern "C" bool ujs_coll_len(const ujs_pointer *owner_in, const char *name, int64_t *out)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_COLLECTION);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -547,8 +566,9 @@ struct coll_iter {
   CollectionPropertyIterator rna;
 };
 
-extern "C" ujs_iter_t ujs_coll_iter(ujs_pointer owner, const char *name)
+extern "C" ujs_iter_t ujs_coll_iter(const ujs_pointer *owner_in, const char *name)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_COLLECTION);
   if (prop == nullptr) return 0;
   PointerRNA ptr = as_rna(owner);
@@ -600,8 +620,9 @@ extern "C" bool ujs_id_new(const char *type_name, const char *name, ujs_pointer 
 /* bpy.data.objects.new: the object's type comes from its data (nullptr
  * data = Empty). An Empty ignores a later RNA data assignment, which is why
  * ujs_id_new("Object", ...) cannot build a mesh object. */
-extern "C" bool ujs_object_new(const char *name, ujs_pointer data, ujs_pointer *out)
+extern "C" bool ujs_object_new(const char *name, const ujs_pointer *data_in, ujs_pointer *out)
 {
+  ujs_pointer data = *data_in;
   ID *id = static_cast<ID *>(data.data);
   int type = OB_EMPTY;
   if (id != nullptr) {
@@ -625,11 +646,12 @@ extern "C" bool ujs_object_new(const char *name, ujs_pointer data, ujs_pointer *
   return true;
 }
 
-extern "C" bool ujs_mesh_from_pydata(ujs_pointer mesh,
+extern "C" bool ujs_mesh_from_pydata(const ujs_pointer *mesh_in,
                                      const double *verts, int32_t nverts,
                                      const int32_t *face_offsets, int32_t nfaces,
                                      const int32_t *face_indices, int32_t nindices)
 {
+  ujs_pointer mesh = *mesh_in;
   PointerRNA ptr = as_rna(mesh);
   if (ptr.type == nullptr || ptr.data == nullptr) {
     set_err("invalid mesh");
@@ -682,8 +704,10 @@ static Collection *coll_of(ujs_pointer coll, const char *name)
   return nullptr;
 }
 
-extern "C" bool ujs_coll_add(ujs_pointer coll, const char *name, ujs_pointer member)
+extern "C" bool ujs_coll_add(const ujs_pointer *coll_in, const char *name, const ujs_pointer *member_in)
 {
+  ujs_pointer coll = *coll_in;
+  ujs_pointer member = *member_in;
   Collection *col = coll_of(coll, name);
   PointerRNA mptr = as_rna(member);
   if (col == nullptr || mptr.data == nullptr) {
@@ -697,8 +721,10 @@ extern "C" bool ujs_coll_add(ujs_pointer coll, const char *name, ujs_pointer mem
   return true;
 }
 
-extern "C" bool ujs_coll_remove(ujs_pointer coll, const char *name, ujs_pointer member)
+extern "C" bool ujs_coll_remove(const ujs_pointer *coll_in, const char *name, const ujs_pointer *member_in)
 {
+  ujs_pointer coll = *coll_in;
+  ujs_pointer member = *member_in;
   Collection *col = coll_of(coll, name);
   PointerRNA mptr = as_rna(member);
   if (col == nullptr || mptr.data == nullptr) {
@@ -835,8 +861,9 @@ extern "C" bool ujs_kx_object_find(const char *name, ujs_pointer *out)
   return false;
 }
 
-extern "C" bool ujs_kx_name(ujs_pointer obj, const char **out)
+extern "C" bool ujs_kx_name(const ujs_pointer *obj_in, const char **out)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) {
     set_err("invalid kx object");
@@ -847,8 +874,9 @@ extern "C" bool ujs_kx_name(ujs_pointer obj, const char **out)
   return true;
 }
 
-extern "C" bool ujs_kx_world_position(ujs_pointer obj, double *xyz)
+extern "C" bool ujs_kx_world_position(const ujs_pointer *obj_in, double *xyz)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) {
     set_err("invalid kx object");
@@ -861,8 +889,9 @@ extern "C" bool ujs_kx_world_position(ujs_pointer obj, double *xyz)
   return true;
 }
 
-extern "C" bool ujs_kx_set_world_position(ujs_pointer obj, const double *xyz)
+extern "C" bool ujs_kx_set_world_position(const ujs_pointer *obj_in, const double *xyz)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) {
     set_err("invalid kx object");
@@ -890,8 +919,9 @@ extern "C" bool ujs_kx_end_game(void)
   return true;
 }
 
-extern "C" bool ujs_kx_get_vec(ujs_pointer obj, const char *what, double *out)
+extern "C" bool ujs_kx_get_vec(const ujs_pointer *obj_in, const char *what, double *out)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   MT_Vector3 v;
@@ -909,8 +939,9 @@ extern "C" bool ujs_kx_get_vec(ujs_pointer obj, const char *what, double *out)
   return true;
 }
 
-extern "C" bool ujs_kx_set_vec(ujs_pointer obj, const char *what, const double *in)
+extern "C" bool ujs_kx_set_vec(const ujs_pointer *obj_in, const char *what, const double *in)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   MT_Vector3 v(in[0], in[1], in[2]);
@@ -928,8 +959,9 @@ extern "C" bool ujs_kx_set_vec(ujs_pointer obj, const char *what, const double *
   return true;
 }
 
-extern "C" bool ujs_kx_get_orientation(ujs_pointer obj, double *m9)
+extern "C" bool ujs_kx_get_orientation(const ujs_pointer *obj_in, double *m9)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   const MT_Matrix3x3 &m = o->NodeGetWorldOrientation();
@@ -938,8 +970,9 @@ extern "C" bool ujs_kx_get_orientation(ujs_pointer obj, double *m9)
   return true;
 }
 
-extern "C" bool ujs_kx_set_orientation(ujs_pointer obj, const double *m9)
+extern "C" bool ujs_kx_set_orientation(const ujs_pointer *obj_in, const double *m9)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   MT_Matrix3x3 m(m9[0], m9[1], m9[2], m9[3], m9[4], m9[5], m9[6], m9[7], m9[8]);
@@ -955,8 +988,9 @@ static PHY_IPhysicsController *kx_phys(KX_GameObject *o)
   return pc;
 }
 
-extern "C" bool ujs_kx_apply(ujs_pointer obj, const char *what, const double *v, const double *at, bool local)
+extern "C" bool ujs_kx_apply(const ujs_pointer *obj_in, const char *what, const double *v, const double *at, bool local)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   MT_Vector3 vec(v[0], v[1], v[2]);
@@ -979,16 +1013,18 @@ extern "C" bool ujs_kx_apply(ujs_pointer obj, const char *what, const double *v,
   return true;
 }
 
-extern "C" bool ujs_kx_get_mass(ujs_pointer obj, double *out)
+extern "C" bool ujs_kx_get_mass(const ujs_pointer *obj_in, double *out)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   *out = o->GetMass();
   return true;
 }
 
-extern "C" bool ujs_kx_set_mass(ujs_pointer obj, double mass)
+extern "C" bool ujs_kx_set_mass(const ujs_pointer *obj_in, double mass)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   PHY_IPhysicsController *pc = kx_phys(o);
@@ -997,8 +1033,9 @@ extern "C" bool ujs_kx_set_mass(ujs_pointer obj, double mass)
   return true;
 }
 
-extern "C" bool ujs_kx_set_damping(ujs_pointer obj, double linear, double angular)
+extern "C" bool ujs_kx_set_damping(const ujs_pointer *obj_in, double linear, double angular)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   if (kx_phys(o) == nullptr) return false;
@@ -1006,8 +1043,9 @@ extern "C" bool ujs_kx_set_damping(ujs_pointer obj, double linear, double angula
   return true;
 }
 
-extern "C" bool ujs_kx_suspend_dynamics(ujs_pointer obj, bool suspend)
+extern "C" bool ujs_kx_suspend_dynamics(const ujs_pointer *obj_in, bool suspend)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   PHY_IPhysicsController *pc = kx_phys(o);
@@ -1032,9 +1070,10 @@ struct ShimRay {
   }
 };
 
-extern "C" bool ujs_kx_raycast(const double *from, const double *to, ujs_pointer ignore,
+extern "C" bool ujs_kx_raycast(const double *from, const double *to, const ujs_pointer *ignore_in,
                                ujs_pointer *hit, double *point, double *normal)
 {
+  ujs_pointer ignore = *ignore_in;
   KX_Scene *scene = kx_scene();
   if (scene == nullptr) {
     set_err("no game running");
@@ -1060,16 +1099,19 @@ extern "C" bool ujs_kx_raycast(const double *from, const double *to, ujs_pointer
   return true; /* a miss is not an error: hit->data stays null */
 }
 
-extern "C" bool ujs_kx_get_parent(ujs_pointer obj, ujs_pointer *out)
+extern "C" bool ujs_kx_get_parent(const ujs_pointer *obj_in, ujs_pointer *out)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   *out = kx_ptr(o->GetParent());
   return true;
 }
 
-extern "C" bool ujs_kx_set_parent(ujs_pointer obj, ujs_pointer parent)
+extern "C" bool ujs_kx_set_parent(const ujs_pointer *obj_in, const ujs_pointer *parent_in)
 {
+  ujs_pointer obj = *obj_in;
+  ujs_pointer parent = *parent_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   if (parent.data == nullptr) {
@@ -1082,8 +1124,9 @@ extern "C" bool ujs_kx_set_parent(ujs_pointer obj, ujs_pointer parent)
   return true;
 }
 
-extern "C" bool ujs_kx_spawn(const char *name, ujs_pointer at, double lifespan, ujs_pointer *out)
+extern "C" bool ujs_kx_spawn(const char *name, const ujs_pointer *at_in, double lifespan, ujs_pointer *out)
 {
+  ujs_pointer at = *at_in;
   KX_Scene *scene = kx_scene();
   if (scene == nullptr) {
     set_err("no game running");
@@ -1113,16 +1156,18 @@ extern "C" bool ujs_kx_spawn(const char *name, ujs_pointer at, double lifespan, 
   return true;
 }
 
-extern "C" bool ujs_kx_remove(ujs_pointer obj)
+extern "C" bool ujs_kx_remove(const ujs_pointer *obj_in)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   kx_scene()->DelayedRemoveObject(o);
   return true;
 }
 
-extern "C" bool ujs_kx_set_camera(ujs_pointer cam)
+extern "C" bool ujs_kx_set_camera(const ujs_pointer *cam_in)
 {
+  ujs_pointer cam = *cam_in;
   KX_GameObject *o = kx_obj(cam);
   if (o == nullptr) return false;
   KX_Scene *scene = kx_scene();
@@ -1137,16 +1182,18 @@ extern "C" bool ujs_kx_set_camera(ujs_pointer cam)
   return false;
 }
 
-extern "C" bool ujs_kx_set_visible(ujs_pointer obj, bool visible, bool recursive)
+extern "C" bool ujs_kx_set_visible(const ujs_pointer *obj_in, bool visible, bool recursive)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   o->SetVisible(visible, recursive);
   return true;
 }
 
-extern "C" bool ujs_kx_blender_object(ujs_pointer obj, ujs_pointer *out)
+extern "C" bool ujs_kx_blender_object(const ujs_pointer *obj_in, ujs_pointer *out)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   Object *ob = o->GetBlenderObject();
@@ -1308,8 +1355,9 @@ extern "C" bool ujs_kx_canvas_size(int32_t *w, int32_t *h)
 
 /* ---- media and overlays (round 4) --------------------------------------------- */
 
-extern "C" bool ujs_kx_set_text(ujs_pointer obj, const char *text)
+extern "C" bool ujs_kx_set_text(const ujs_pointer *obj_in, const char *text)
 {
+  ujs_pointer obj = *obj_in;
   KX_GameObject *o = kx_obj(obj);
   if (o == nullptr) return false;
   KX_FontObject *font = dynamic_cast<KX_FontObject *>(o);
@@ -2093,9 +2141,10 @@ static void read_param(PointerRNA *self, PropertyRNA *parm, ParameterList *list,
   }
 }
 
-extern "C" bool ujs_func_call(ujs_pointer self_p, const char *fname, int32_t n,
+extern "C" bool ujs_func_call(const ujs_pointer *self_p_in, const char *fname, int32_t n,
                               const char **names, const ujs_value *args, ujs_value *ret)
 {
+  ujs_pointer self_p = *self_p_in;
   bContext *C = ctx();
   PointerRNA self = as_rna(self_p);
   if (self.type == nullptr) {
@@ -2177,8 +2226,9 @@ extern "C" bool ujs_func_call(ujs_pointer self_p, const char *fname, int32_t n,
 
 /* ---- collection lookup and bulk access ---------------------------------------------- */
 
-extern "C" bool ujs_coll_ptr(ujs_pointer owner, const char *name, ujs_pointer *out)
+extern "C" bool ujs_coll_ptr(const ujs_pointer *owner_in, const char *name, ujs_pointer *out)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_COLLECTION);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -2191,8 +2241,9 @@ extern "C" bool ujs_coll_ptr(ujs_pointer owner, const char *name, ujs_pointer *o
   return true;
 }
 
-extern "C" bool ujs_set_enum_id(ujs_pointer owner, const char *name, const char *ids)
+extern "C" bool ujs_set_enum_id(const ujs_pointer *owner_in, const char *name, const char *ids)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_ENUM);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -2218,9 +2269,10 @@ extern "C" bool ujs_set_enum_id(ujs_pointer owner, const char *name, const char 
   return true;
 }
 
-extern "C" bool ujs_coll_lookup(ujs_pointer owner, const char *name, const char *key,
+extern "C" bool ujs_coll_lookup(const ujs_pointer *owner_in, const char *name, const char *key,
                                 int64_t index, ujs_pointer *out)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop_typed(owner, name, PROP_COLLECTION);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -2258,22 +2310,25 @@ static bool foreach_raw(ujs_pointer owner, const char *name, const char *attr, d
   return true;
 }
 
-extern "C" bool ujs_coll_foreach_get(ujs_pointer owner, const char *name, const char *attr,
+extern "C" bool ujs_coll_foreach_get(const ujs_pointer *owner_in, const char *name, const char *attr,
                                      double *buf, int64_t len)
 {
+  ujs_pointer owner = *owner_in;
   return foreach_raw(owner, name, attr, buf, len, false);
 }
 
-extern "C" bool ujs_coll_foreach_set(ujs_pointer owner, const char *name, const char *attr,
+extern "C" bool ujs_coll_foreach_set(const ujs_pointer *owner_in, const char *name, const char *attr,
                                      const double *buf, int64_t len)
 {
+  ujs_pointer owner = *owner_in;
   return foreach_raw(owner, name, attr, const_cast<double *>(buf), len, true);
 }
 
 /* ---- int/bool arrays ---------------------------------------------------------------- */
 
-extern "C" bool ujs_get_int_array(ujs_pointer owner, const char *name, int64_t **out, int32_t *len)
+extern "C" bool ujs_get_int_array(const ujs_pointer *owner_in, const char *name, int64_t **out, int32_t *len)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop(owner, name);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);
@@ -2301,8 +2356,9 @@ extern "C" bool ujs_get_int_array(ujs_pointer owner, const char *name, int64_t *
   return true;
 }
 
-extern "C" bool ujs_set_int_array(ujs_pointer owner, const char *name, const int64_t *v, int32_t len)
+extern "C" bool ujs_set_int_array(const ujs_pointer *owner_in, const char *name, const int64_t *v, int32_t len)
 {
+  ujs_pointer owner = *owner_in;
   PropertyRNA *prop = find_prop(owner, name);
   if (prop == nullptr) return false;
   PointerRNA ptr = as_rna(owner);

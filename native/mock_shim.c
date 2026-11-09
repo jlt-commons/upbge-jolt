@@ -178,7 +178,8 @@ bool ujs_root(ujs_pointer *out) {
 
 /* --- introspection -------------------------------------------------------- */
 
-bool ujs_prop_find(ujs_pointer owner, const char *name, ujs_prop_desc *out) {
+bool ujs_prop_find(const ujs_pointer *owner_in, const char *name, ujs_prop_desc *out) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -189,7 +190,8 @@ bool ujs_prop_find(ujs_pointer owner, const char *name, ujs_prop_desc *out) {
 
 typedef struct { mock_obj *o; int idx; } props_iter;
 
-ujs_iter_t ujs_props_iter(ujs_pointer owner) {
+ujs_iter_t ujs_props_iter(const ujs_pointer *owner_in) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) return 0;
   props_iter *it = calloc(1, sizeof *it);
@@ -208,7 +210,8 @@ void ujs_props_iter_free(ujs_iter_t h) { free((void *)(intptr_t)h); }
 
 /* --- get ------------------------------------------------------------------ */
 
-bool ujs_get_bool(ujs_pointer owner, const char *name, bool *out) {
+bool ujs_get_bool(const ujs_pointer *owner_in, const char *name, bool *out) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -218,7 +221,8 @@ bool ujs_get_bool(ujs_pointer owner, const char *name, bool *out) {
   return true;
 }
 
-bool ujs_get_int(ujs_pointer owner, const char *name, int64_t *out) {
+bool ujs_get_int(const ujs_pointer *owner_in, const char *name, int64_t *out) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -228,7 +232,8 @@ bool ujs_get_int(ujs_pointer owner, const char *name, int64_t *out) {
   return true;
 }
 
-bool ujs_get_float(ujs_pointer owner, const char *name, double *out) {
+bool ujs_get_float(const ujs_pointer *owner_in, const char *name, double *out) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -238,7 +243,8 @@ bool ujs_get_float(ujs_pointer owner, const char *name, double *out) {
   return true;
 }
 
-bool ujs_get_string(ujs_pointer owner, const char *name, const char **out) {
+bool ujs_get_string(const ujs_pointer *owner_in, const char *name, const char **out) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -249,7 +255,8 @@ bool ujs_get_string(ujs_pointer owner, const char *name, const char **out) {
   return true;
 }
 
-bool ujs_get_enum(ujs_pointer owner, const char *name, int64_t *out, const char **idname_out) {
+bool ujs_get_enum(const ujs_pointer *owner_in, const char *name, int64_t *out, const char **idname_out) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -263,7 +270,8 @@ bool ujs_get_enum(ujs_pointer owner, const char *name, int64_t *out, const char 
   return true;
 }
 
-bool ujs_get_pointer(ujs_pointer owner, const char *name, ujs_pointer *out) {
+bool ujs_get_pointer(const ujs_pointer *owner_in, const char *name, ujs_pointer *out) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -283,11 +291,12 @@ static int dyn_len(const mock_prop *p) {
   return p->array_len > 0 ? p->array_len : p->dyn_len;
 }
 
-static double *dyn_data(const mock_prop *p) {
+static double *dyn_data(mock_prop *p) {
   return p->array_len > 0 ? p->v.fa : p->v.dyn;
 }
 
-bool ujs_get_float_array(ujs_pointer owner, const char *name, double *out, int32_t len) {
+bool ujs_get_float_array(const ujs_pointer *owner_in, const char *name, double *out, int32_t len) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -299,7 +308,8 @@ bool ujs_get_float_array(ujs_pointer owner, const char *name, double *out, int32
   return true;
 }
 
-bool ujs_get_float_array_n(ujs_pointer owner, const char *name, double **out_data, int32_t *out_len) {
+bool ujs_get_float_array_n(const ujs_pointer *owner_in, const char *name, double **out_data, int32_t *out_len) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -315,7 +325,8 @@ bool ujs_get_float_array_n(ujs_pointer owner, const char *name, double **out_dat
 
 /* --- set ------------------------------------------------------------------ */
 
-bool ujs_set_bool(ujs_pointer owner, const char *name, bool v) {
+bool ujs_set_bool(const ujs_pointer *owner_in, const char *name, bool v) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -325,7 +336,8 @@ bool ujs_set_bool(ujs_pointer owner, const char *name, bool v) {
   return true;
 }
 
-bool ujs_set_int(ujs_pointer owner, const char *name, int64_t v) {
+bool ujs_set_int(const ujs_pointer *owner_in, const char *name, int64_t v) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -335,7 +347,8 @@ bool ujs_set_int(ujs_pointer owner, const char *name, int64_t v) {
   return true;
 }
 
-bool ujs_set_float(ujs_pointer owner, const char *name, double v) {
+bool ujs_set_float(const ujs_pointer *owner_in, const char *name, double v) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -345,7 +358,8 @@ bool ujs_set_float(ujs_pointer owner, const char *name, double v) {
   return true;
 }
 
-bool ujs_set_string(ujs_pointer owner, const char *name, const char *v) {
+bool ujs_set_string(const ujs_pointer *owner_in, const char *name, const char *v) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -355,7 +369,8 @@ bool ujs_set_string(ujs_pointer owner, const char *name, const char *v) {
   return true;
 }
 
-bool ujs_set_enum(ujs_pointer owner, const char *name, int64_t v) {
+bool ujs_set_enum(const ujs_pointer *owner_in, const char *name, int64_t v) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -366,7 +381,9 @@ bool ujs_set_enum(ujs_pointer owner, const char *name, int64_t v) {
   return true;
 }
 
-bool ujs_set_pointer(ujs_pointer owner, const char *name, ujs_pointer v) {
+bool ujs_set_pointer(const ujs_pointer *owner_in, const char *name, const ujs_pointer *v_in) {
+  ujs_pointer owner = *owner_in;
+  ujs_pointer v = *v_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -379,7 +396,8 @@ bool ujs_set_pointer(ujs_pointer owner, const char *name, ujs_pointer v) {
   return true;
 }
 
-bool ujs_set_float_array(ujs_pointer owner, const char *name, const double *v, int32_t len) {
+bool ujs_set_float_array(const ujs_pointer *owner_in, const char *name, const double *v, int32_t len) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, name);
@@ -393,7 +411,8 @@ bool ujs_set_float_array(ujs_pointer owner, const char *name, const double *v, i
 
 /* --- collections ---------------------------------------------------------- */
 
-bool ujs_coll_len(ujs_pointer owner, const char *name, int64_t *out) {
+bool ujs_coll_len(const ujs_pointer *owner_in, const char *name, int64_t *out) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   /* the mock exposes one collection: Scene.objects */
@@ -407,7 +426,8 @@ bool ujs_coll_len(ujs_pointer owner, const char *name, int64_t *out) {
 
 typedef struct { mock_obj *o; int idx; } coll_iter;
 
-ujs_iter_t ujs_coll_iter(ujs_pointer owner, const char *name) {
+ujs_iter_t ujs_coll_iter(const ujs_pointer *owner_in, const char *name) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) return 0;
   if (strcmp(o->name, "Scene") != 0 || strcmp(name, "objects") != 0) return 0;
@@ -453,7 +473,8 @@ bool ujs_id_new(const char *type_name, const char *name, ujs_pointer *out) {
   return true;
 }
 
-bool ujs_object_new(const char *name, ujs_pointer data, ujs_pointer *out) {
+bool ujs_object_new(const char *name, const ujs_pointer *data_in, ujs_pointer *out) {
+  ujs_pointer data = *data_in;
   if (!ujs_id_new("Object", name, out)) return false;
   mock_obj *o = obj_of(*out);
   if (data.data) {
@@ -463,10 +484,11 @@ bool ujs_object_new(const char *name, ujs_pointer data, ujs_pointer *out) {
   return true;
 }
 
-bool ujs_mesh_from_pydata(ujs_pointer mesh,
+bool ujs_mesh_from_pydata(const ujs_pointer *mesh_in,
                           const double *verts, int32_t nverts,
                           const int32_t *face_offsets, int32_t nfaces,
                           const int32_t *face_indices, int32_t nindices) {
+  ujs_pointer mesh = *mesh_in;
   mock_obj *o = obj_of(mesh);
   if (!o) { set_err("invalid pointer"); return false; }
   mock_prop *p = prop_find(o, "vertices");
@@ -493,7 +515,9 @@ bool ujs_mesh_from_pydata(ujs_pointer mesh,
   return true;
 }
 
-bool ujs_coll_add(ujs_pointer coll, const char *name, ujs_pointer member) {
+bool ujs_coll_add(const ujs_pointer *coll_in, const char *name, const ujs_pointer *member_in) {
+  ujs_pointer coll = *coll_in;
+  ujs_pointer member = *member_in;
   mock_obj *o = obj_of(coll);
   if (!o) { set_err("invalid pointer"); return false; }
   if (strcmp(o->name, "Scene") != 0 || strcmp(name, "objects") != 0) {
@@ -507,7 +531,9 @@ bool ujs_coll_add(ujs_pointer coll, const char *name, ujs_pointer member) {
   return true;
 }
 
-bool ujs_coll_remove(ujs_pointer coll, const char *name, ujs_pointer member) {
+bool ujs_coll_remove(const ujs_pointer *coll_in, const char *name, const ujs_pointer *member_in) {
+  ujs_pointer coll = *coll_in;
+  ujs_pointer member = *member_in;
   mock_obj *o = obj_of(coll);
   if (!o) { set_err("invalid pointer"); return false; }
   if (strcmp(o->name, "Scene") != 0 || strcmp(name, "objects") != 0) {
@@ -538,10 +564,10 @@ bool ujs_operator_call(const char *opname) {
     };
     ujs_pointer mesh, obj, scene;
     if (!ujs_id_new("Mesh", "Cube", &mesh)) return false;
-    if (!ujs_mesh_from_pydata(mesh, verts, 8, face_offsets, 6, face_indices, 24)) return false;
-    if (!ujs_object_new("Cube", mesh, &obj)) return false;
+    if (!ujs_mesh_from_pydata(&mesh, verts, 8, face_offsets, 6, face_indices, 24)) return false;
+    if (!ujs_object_new("Cube", &mesh, &obj)) return false;
     if (!ujs_root(&scene)) return false;
-    return ujs_coll_add(scene, "objects", obj);
+    return ujs_coll_add(&scene, "objects", &obj);
   }
   if (strcmp(opname, "object.select_all") == 0) {
     return true; /* no-op in the toy scene */
@@ -581,7 +607,8 @@ bool ujs_kx_object_find(const char *name, ujs_pointer *out) {
   return false;
 }
 
-bool ujs_kx_name(ujs_pointer obj, const char **out) {
+bool ujs_kx_name(const ujs_pointer *obj_in, const char **out) {
+  ujs_pointer obj = *obj_in;
   mock_kx_obj *o = kx_of(obj);
   if (!o) { set_err("invalid kx object"); return false; }
   snprintf(g_str_buf, sizeof g_str_buf, "%s", o->name);
@@ -589,14 +616,16 @@ bool ujs_kx_name(ujs_pointer obj, const char **out) {
   return true;
 }
 
-bool ujs_kx_world_position(ujs_pointer obj, double *xyz) {
+bool ujs_kx_world_position(const ujs_pointer *obj_in, double *xyz) {
+  ujs_pointer obj = *obj_in;
   mock_kx_obj *o = kx_of(obj);
   if (!o) { set_err("invalid kx object"); return false; }
   memcpy(xyz, o->pos, 3 * sizeof(double));
   return true;
 }
 
-bool ujs_kx_set_world_position(ujs_pointer obj, const double *xyz) {
+bool ujs_kx_set_world_position(const ujs_pointer *obj_in, const double *xyz) {
+  ujs_pointer obj = *obj_in;
   mock_kx_obj *o = kx_of(obj);
   if (!o) { set_err("invalid kx object"); return false; }
   memcpy(o->pos, xyz, 3 * sizeof(double));
@@ -651,7 +680,8 @@ bool ujs_operator_call_ex(const char *opname, int32_t n, const char **keys,
 }
 
 /* A collection's function struct: same object, type 1 marks "Scene.objects". */
-bool ujs_coll_ptr(ujs_pointer owner, const char *name, ujs_pointer *out) {
+bool ujs_coll_ptr(const ujs_pointer *owner_in, const char *name, ujs_pointer *out) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   if (strcmp(o->name, "Scene") != 0 || strcmp(name, "objects") != 0) {
@@ -662,8 +692,9 @@ bool ujs_coll_ptr(ujs_pointer owner, const char *name, ujs_pointer *out) {
   return true;
 }
 
-bool ujs_func_call(ujs_pointer self, const char *fname, int32_t n,
+bool ujs_func_call(const ujs_pointer *self_in, const char *fname, int32_t n,
                    const char **names, const ujs_value *args, ujs_value *ret) {
+  ujs_pointer self = *self_in;
   mock_obj *o = obj_of(self);
   if (!o) { set_err("invalid pointer"); return false; }
   memset(ret, 0, sizeof *ret);
@@ -672,8 +703,8 @@ bool ujs_func_call(ujs_pointer self, const char *fname, int32_t n,
     for (int i = 0; i < n; i++)
       if (strcmp(names[i], "object") == 0) {
         ujs_pointer scene = self; scene.type = 0;
-        return strcmp(fname, "link") == 0 ? ujs_coll_add(scene, "objects", args[i].p)
-                                          : ujs_coll_remove(scene, "objects", args[i].p);
+        return strcmp(fname, "link") == 0 ? ujs_coll_add(&scene, "objects", &args[i].p)
+                                          : ujs_coll_remove(&scene, "objects", &args[i].p);
       }
     set_err("missing required argument object");
     return false;
@@ -684,8 +715,9 @@ bool ujs_func_call(ujs_pointer self, const char *fname, int32_t n,
   return false;
 }
 
-bool ujs_coll_lookup(ujs_pointer owner, const char *name, const char *key,
+bool ujs_coll_lookup(const ujs_pointer *owner_in, const char *name, const char *key,
                      int64_t index, ujs_pointer *out) {
+  ujs_pointer owner = *owner_in;
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
   if (strcmp(o->name, "Scene") != 0 || strcmp(name, "objects") != 0) {
@@ -716,16 +748,18 @@ static mock_prop *foreach_prop(ujs_pointer owner, const char *name, const char *
   return p;
 }
 
-bool ujs_coll_foreach_get(ujs_pointer owner, const char *name, const char *attr,
+bool ujs_coll_foreach_get(const ujs_pointer *owner_in, const char *name, const char *attr,
                           double *buf, int64_t len) {
+  ujs_pointer owner = *owner_in;
   mock_prop *p = foreach_prop(owner, name, attr, len);
   if (!p) return false;
   memcpy(buf, p->v.dyn, len * sizeof(double));
   return true;
 }
 
-bool ujs_coll_foreach_set(ujs_pointer owner, const char *name, const char *attr,
+bool ujs_coll_foreach_set(const ujs_pointer *owner_in, const char *name, const char *attr,
                           const double *buf, int64_t len) {
+  ujs_pointer owner = *owner_in;
   mock_prop *p = foreach_prop(owner, name, attr, len);
   if (!p) return false;
   memcpy(p->v.dyn, buf, len * sizeof(double));
@@ -742,7 +776,8 @@ static mock_prop *int_array_prop(ujs_pointer owner, const char *name) {
   return p;
 }
 
-bool ujs_get_int_array(ujs_pointer owner, const char *name, int64_t **out, int32_t *len) {
+bool ujs_get_int_array(const ujs_pointer *owner_in, const char *name, int64_t **out, int32_t *len) {
+  ujs_pointer owner = *owner_in;
   mock_prop *p = int_array_prop(owner, name);
   if (!p) return false;
   int64_t *d = malloc(p->array_len * sizeof(int64_t));
@@ -752,7 +787,8 @@ bool ujs_get_int_array(ujs_pointer owner, const char *name, int64_t **out, int32
   return true;
 }
 
-bool ujs_set_int_array(ujs_pointer owner, const char *name, const int64_t *v, int32_t len) {
+bool ujs_set_int_array(const ujs_pointer *owner_in, const char *name, const int64_t *v, int32_t len) {
+  ujs_pointer owner = *owner_in;
   mock_prop *p = int_array_prop(owner, name);
   if (!p) return false;
   if (len != p->array_len) { set_err("array length mismatch"); return false; }
@@ -760,7 +796,8 @@ bool ujs_set_int_array(ujs_pointer owner, const char *name, const int64_t *v, in
   return true;
 }
 
-bool ujs_set_enum_id(ujs_pointer owner, const char *name, const char *ids) {
+bool ujs_set_enum_id(const ujs_pointer *owner_in, const char *name, const char *ids) {
+  ujs_pointer owner = *owner_in;
   static const char *items[] = {"OBJECT", "EDIT", "SCULPT"};
   mock_obj *o = obj_of(owner);
   if (!o) { set_err("invalid pointer"); return false; }
@@ -795,7 +832,8 @@ bool ujs_kx_end_game(void) {
 
 /* --- KX runtime (round 3): the mock models positions only ------------------- */
 
-bool ujs_kx_get_vec(ujs_pointer obj, const char *what, double *out) {
+bool ujs_kx_get_vec(const ujs_pointer *obj_in, const char *what, double *out) {
+  ujs_pointer obj = *obj_in;
   mock_kx_obj *o = kx_of(obj);
   if (!o) { set_err("invalid kx object"); return false; }
   if (strcmp(what, "position") != 0) { set_err("mock: only position"); return false; }
@@ -803,7 +841,8 @@ bool ujs_kx_get_vec(ujs_pointer obj, const char *what, double *out) {
   return true;
 }
 
-bool ujs_kx_set_vec(ujs_pointer obj, const char *what, const double *v) {
+bool ujs_kx_set_vec(const ujs_pointer *obj_in, const char *what, const double *v) {
+  ujs_pointer obj = *obj_in;
   mock_kx_obj *o = kx_of(obj);
   if (!o) { set_err("invalid kx object"); return false; }
   if (strcmp(what, "position") != 0) { set_err("mock: only position"); return false; }
