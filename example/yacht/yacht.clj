@@ -620,19 +620,25 @@
 
 (defn build-cockpit! [root mats]
   (let [zb 1.73]
-    ;; aft U-lounge
-    (box! "Y-LoungeBaseA" [-1.95 -8.45 1.55] [1.95 -7.85 1.96] (:white mats) root)
+    ;; aft U-lounge. Two halves with a 1.1 m centre walk-through: the player
+    ;; boards from the swim platform through the transom steps and continues
+    ;; between them into the cockpit.
+    (box! "Y-LoungeBaseAP" [-1.95 -8.45 1.55] [-0.55 -7.85 1.96] (:white mats) root)
+    (box! "Y-LoungeBaseAS" [0.55 -8.45 1.55] [1.95 -7.85 1.96] (:white mats) root)
     (box! "Y-LoungeBaseP" [-1.95 -7.85 1.55] [-1.55 -6.30 1.96] (:white mats) root)
     (box! "Y-LoungeBaseS" [1.55 -7.85 1.55] [1.95 -6.30 1.96] (:white mats) root)
-    (seat-cushion! "Y-LoungeSeatA" [0.0 -8.15 2.02] 1.85 0.30 0.13 (:leather mats) root)
+    (seat-cushion! "Y-LoungeSeatAP" [-1.25 -8.15 2.02] 0.70 0.30 0.13 (:leather mats) root)
+    (seat-cushion! "Y-LoungeSeatAS" [1.25 -8.15 2.02] 0.70 0.30 0.13 (:leather mats) root)
     (seat-cushion! "Y-LoungeSeatP" [-1.75 -7.10 2.02] 0.30 0.72 0.13 (:leather mats) root)
     (seat-cushion! "Y-LoungeSeatS" [1.75 -7.10 2.02] 0.30 0.72 0.13 (:leather mats) root)
-    (seat-cushion! "Y-LoungeBackA" [0.0 -8.42 2.36] 1.85 0.12 0.30 (:leather mats) root)
+    (seat-cushion! "Y-LoungeBackAP" [-1.25 -8.42 2.36] 0.70 0.12 0.30 (:leather mats) root)
+    (seat-cushion! "Y-LoungeBackAS" [1.25 -8.42 2.36] 0.70 0.12 0.30 (:leather mats) root)
     (seat-cushion! "Y-LoungeBackP" [-1.92 -7.10 2.36] 0.12 0.72 0.30 (:leather mats) root)
     (seat-cushion! "Y-LoungeBackS" [1.92 -7.10 2.36] 0.12 0.72 0.30 (:leather mats) root)
-    ;; coffee table
-    (superellipsoid! "Y-CockpitTable" [0.0 -7.15 2.10] 0.62 0.42 0.05 0.4 0.35 18 8 (:teak mats) root)
-    (cylinder! "Y-TableLeg" [0.0 -7.15 1.95] [0.0 -7.15 2.05] 0.055 10 (:steel mats) root)
+    ;; coffee table, forward of the boarding walk-through so the route from
+    ;; the transom into the U-lounge is clear
+    (superellipsoid! "Y-CockpitTable" [0.0 -6.35 2.10] 0.62 0.42 0.05 0.4 0.35 18 8 (:teak mats) root)
+    (cylinder! "Y-TableLeg" [0.0 -6.35 1.95] [0.0 -6.35 2.05] 0.055 10 (:steel mats) root)
     ;; wet bar
     (box! "Y-WetBar" [1.10 -6.05 1.55] [2.10 -4.55 2.35] (:white mats) root)
     (box! "Y-WetBarTop" [1.08 -6.08 2.35] [2.12 -4.52 2.42] (:stone mats) root)

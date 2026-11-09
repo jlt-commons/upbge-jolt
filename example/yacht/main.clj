@@ -81,13 +81,19 @@
 ;; state + object cache
 ;; ---------------------------------------------------------------------------
 
+;; Start on the starboard side of the swim platform: at x=0 the stern flag pole
+;; is right in front of the eye. yaw is slightly to port so the transom steps
+;; and cockpit are in view.
+(def start-pos [1.25 -11.70 0.42])
+(def start-yaw 0.18)
+
 (def S (atom
         {:t 0.0
          :yacht {:pos [24.0 -16.0 0.0] :yaw 0.0 :pitch 0.0 :roll 0.0
                  :speed 0.0 :throttle 0.0 :target-pitch 0.0 :target-roll 0.0}
          :mode :intro
          :intro-t 0.0
-         :player {:pos [0.0 -11.6 0.42] :yaw 0.0 :pitch 0.0}
+         :player {:pos start-pos :yaw start-yaw :pitch 0.0}
          :driving false
          :chase false
          :orbit {:pos [10.0 -26.0 9.0] :yaw -0.6 :pitch -0.15}
@@ -159,10 +165,13 @@
 
 (def static-obstacles
   ;; [x0 x1 y0 y1 z0 z1] local AABBs
-  [[-1.97 1.97 -8.50 -7.80 1.45 2.70]   ; aft bench
+  [[-1.97 -0.55 -8.50 -7.80 1.45 2.70] ; aft bench, port half
+   [0.55 1.97 -8.50 -7.80 1.45 2.70]    ; aft bench, starboard half
+   ;; centre gap between the halves is the boarding walk-through from the
+   ;; swim platform / transom steps into the cockpit
    [-1.97 -1.50 -7.85 -6.25 1.45 2.70]  ; port bench
    [1.50 1.97 -7.85 -6.25 1.45 2.70]    ; stbd bench
-   [-0.68 0.68 -7.62 -6.68 1.50 2.45]   ; cockpit table
+   [-0.68 0.68 -6.82 -5.88 1.50 2.45]   ; cockpit table (moved fwd to clear the boarding walk-through)
    [1.03 2.17 -6.10 -4.50 1.45 2.55]    ; wet bar
    [-0.80 1.60 -3.02 -2.24 1.50 2.55]   ; helm console
    [-0.26 0.48 -3.92 -3.20 1.50 2.75]   ; helm seat P
@@ -365,21 +374,46 @@
 
 (defn wrap-pi [a] (- (mod (+ (double a) PI) (* 2.0 PI)) PI))
 
-(defn update-look! [dt]
+(def ^:private mouse-deadzone 0.0025)
+(def ^:private mouse-state (atom {:last nil}))
+
+(defn mouse-look-delta
+  "Normalised mouse movement since the last frame, with a small deadzone.
+
+  Tries to recentre the cursor after reading. If the host ignores the warp
+  (an embedded window that does not hold the cursor), the reads stay at a
+  fixed off-centre position; using raw position deltas then makes the view
+  hold still instead of spinning forever. When the warp does work, the
+  recentred position is the next frame's baseline."
+  []
   (let [m (bge/mouse)
         mx (double (nth m 0)) my (double (nth m 1))
-        ;; SetMousePosition is a no-op for some embedded windows, so only
-        ;; apply the delta while the cursor is actually inside the canvas.
-        inside (and (>= mx 0.02) (<= mx 0.98) (>= my 0.02) (<= my 0.98))
-        dx (clamp (- mx 0.5) -0.10 0.10)
-        dy (clamp (- my 0.5) -0.10 0.10)
-        {:keys [mode look]} @S]
-    (when (and look inside (not= mode :intro) (not= mode :orbit))
-      (swap! S update :player
-             (fn [p] (-> p
-                         (update :yaw (fn [y] (wrap-pi (- y (* dx 2.4)))))
-                         (update :pitch (fn [ph] (clamp (- ph (* dy 1.8)) -1.30 1.30))))))
-      (bge/mouse! 0.5 0.5))))
+        inside (and (>= mx 0.02) (<= mx 0.98) (>= my 0.02) (<= my 0.98))]
+    (if-not inside
+      (do (swap! mouse-state assoc :last nil) [0.0 0.0])
+      (let [last (:last @mouse-state)
+            dx0 (- mx (if last (double (nth last 0)) mx))
+            dy0 (- my (if last (double (nth last 1)) my))
+            dx (if (< (Math/abs dx0) mouse-deadzone) 0.0 dx0)
+            dy (if (< (Math/abs dy0) mouse-deadzone) 0.0 dy0)
+            _ (bge/mouse! 0.5 0.5)
+            am (bge/mouse)
+            ax (double (nth am 0)) ay (double (nth am 1))
+            warped (and (< (Math/abs (- ax 0.5)) 0.08)
+                        (< (Math/abs (- ay 0.5)) 0.08))]
+        ;; Offset the recentre bias so a still mouse reads as zero movement.
+        (swap! mouse-state assoc :last (if warped [ax ay] [mx my]))
+        [(clamp dx -0.10 0.10) (clamp dy -0.10 0.10)]))))
+
+(defn update-look! [dt]
+  (let [{:keys [mode look]} @S]
+    (when (and look (not= mode :intro) (not= mode :orbit))
+      (let [[dx dy] (mouse-look-delta)]
+        (when (or (not (zero? dx)) (not (zero? dy)))
+          (swap! S update :player
+                 (fn [p] (-> p
+                             (update :yaw (fn [y] (wrap-pi (- y (* dx 2.4)))))
+                             (update :pitch (fn [ph] (clamp (- ph (* dy 1.8)) -1.30 1.30)))))))))))
 
 (defn player-world []
   (let [{:keys [player]} @S
@@ -663,7 +697,7 @@
     (start-audio!))
   (when (and (= (:mode @S) :intro)
              (some bge/key-pressed? ["WKEY" "AKEY" "SKEY" "DKEY" "EKEY" "CKEY" "OKEY" "TKEY" "F1KEY" "HKEY" "PKEY" "SPACEKEY" "LEFTMOUSE" "ESCKEY"]))
-    (swap! S assoc :mode :walk :player {:pos [0.0 -11.6 0.42] :yaw 0.0 :pitch 0.0} :look true)
+    (swap! S assoc :mode :walk :player {:pos start-pos :yaw start-yaw :pitch 0.0} :look true)
     (bge/show-mouse! false)
     (bge/mouse! 0.5 0.5))
   (when (and (not= (:mode @S) :intro) (bge/key-pressed? "EKEY") (:driving @S))
@@ -722,11 +756,7 @@
 (defn update-orbit! [dt]
   (when (= (:mode @S) :orbit)
     (let [{:keys [pos yaw pitch]} (:orbit @S)
-          m (bge/mouse)
-          mx (double (nth m 0)) my (double (nth m 1))
-          inside (and (>= mx 0.02) (<= mx 0.98) (>= my 0.02) (<= my 0.98))
-          dx (if inside (clamp (- mx 0.5) -0.10 0.10) 0.0)
-          dy (if inside (clamp (- my 0.5) -0.10 0.10) 0.0)
+          [dx dy] (mouse-look-delta)
           yaw' (- yaw (* dx 2.2))
           pitch' (clamp (- pitch (* dy 1.8)) -1.4 1.4)
           sp (* (if (bge/key-down? "LEFTSHIFTKEY") 18.0 7.0) dt)
@@ -736,8 +766,7 @@
                    (vmul r (cond (bge/key-down? "DKEY") sp (bge/key-down? "AKEY") (- sp) :else 0.0)))
           up (cond (bge/key-down? "EKEY") sp (bge/key-down? "QKEY") (- sp) :else 0.0)
           npos (vadd (vadd pos mv) [0.0 0.0 up])]
-      (swap! S assoc :orbit {:pos npos :yaw yaw' :pitch pitch'})
-      (bge/mouse! 0.5 0.5))))
+      (swap! S assoc :orbit {:pos npos :yaw yaw' :pitch pitch'}))))
 
 ;; ---------------------------------------------------------------------------
 ;; audio
@@ -771,7 +800,7 @@
       (when (= (:mode @S) :intro)
         (swap! S update :intro-t + dt)
         (when (> (:intro-t @S) 18.0)
-          (swap! S assoc :mode :walk :player {:pos [0.0 -11.6 0.42] :yaw 0.0 :pitch 0.0})
+          (swap! S assoc :mode :walk :player {:pos start-pos :yaw start-yaw :pitch 0.0})
           (msg! "Walk mode · W A S D to move · E at the helm")))
       (when (contains? #{:walk :helm :chase} (:mode @S))
         (update-player! dt))

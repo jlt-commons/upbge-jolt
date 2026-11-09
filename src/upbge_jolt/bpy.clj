@@ -133,6 +133,11 @@
   \"MATERIAL\" or \"SOLID\"; :camera? true looks through the scene camera.
   Returns the number of viewports changed."
   [{:keys [shading camera?] :or {shading "RENDERED"}}]
+  ;; the game renders through this viewport and saves/restores its shading
+  ;; around the run; changing it underneath a game breaks the game's render
+  (when (b/kx-running?)
+    (throw (ex-info "can't change the viewport while a game is running: it is the game's canvas; (game/stop!) first"
+                    {:shading shading})))
   (let [screen (b/get (b/context) "screen")
         areas (filter #(= "VIEW_3D" (:idname (b/get % "type"))) (b/coll screen "areas"))]
     (doseq [area areas

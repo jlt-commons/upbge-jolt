@@ -62,22 +62,31 @@ its own notes.
 
 ## Known problems
 
-- **GPU cost: about 12 s per frame with shadows on.** The sun's shadow map
-  covers the 16 km displaced Ocean out to HeroCam's 40 km `clip_end`. With
-  the ocean hidden, or shadows off, the editor runs at full speed. Fix
-  before anything else: shrink the ocean (or tile it near the camera), cut
-  `clip_end` to a few km, and set the Ocean's `visible_shadow` false. Then
-  measure fps in game.
-
-- The frame rate was low with ray tracing and high TAA. The previous session
-  lowered quality; recheck `(:fps (bge/frame-info))` after item 1 above.
+- **Fixed in session 4:** the GPU cost of the ocean. The Ocean is now 2.4 km
+  and 5.7k vertices, casts no shadow, and HeroCam's clip_end is 4 km. The
+  editor's Rendered view is responsive again (54 ticks/s at ~3% CPU).
+- **The ocean material was switched from DISPLACEMENT to BUMP** to save GPU.
+  The waves are now a lighting effect and no longer move geometry, which
+  breaks PROMPT.md's "same wave function on CPU and GPU" visually. Restore
+  displacement on the smaller ocean if fps allows, or displace only a
+  near-camera patch.
+- **Game fps is GPU-bound and varies with the view, 3-30 fps** (CPU ~5%).
+  Measure over at least 25 s after any settings change: shader recompiles
+  skew the average, and the intro camera's view changes the cost. Candidates:
+  shadow-casting objects, the number of point lights, `use_fast_gi`,
+  `taa_samples`.
+- **main.clj still sets Value nodes every frame** (wave time and the hull
+  mask). Move them to `nodes/object-params!`.
+- **Session 4's Blender crashed** in the game's render, right after the live
+  view's shading was changed while a game was running. `bpy/viewport!` now
+  refuses that; stop the game first.
 - Mouse warp (`bge/mouse!`) didn't take effect while the game window lacked
-  the cursor, which made mouse look spin. main.clj guards against it. This
-  still needs checking against the engine by a person playing.
-- Setting materials one polygon at a time was very slow (49 s). The build now
-  uses bulk `foreach-set!` on `material_index`.
-- Long builds can exceed an agent's 120 s nREPL request timeout. Split them
-  into smaller evaluations.
+  the cursor, which made mouse look spin. main.clj guards against it. A
+  person needs to check this in play.
+- Setting materials one polygon at a time was very slow (49 s). Use bulk
+  `foreach-set!` on `material_index`.
+- Long builds can exceed the agent's nREPL request timeout. Split them into
+  smaller evaluations.
 
 ## API gaps noted
 

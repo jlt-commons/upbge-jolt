@@ -1,7 +1,8 @@
 (ns upbge-jolt.bpy-test
   "The ergonomic REPL surface over the bridge: keyword access, keyword
   lookup, threading helpers. Against the mock shim."
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [jolt.ffi :as ffi]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [upbge-jolt.bpy :as bpy]
             [upbge-jolt.bridge :as b]
             [upbge-jolt.tick-pump :as pump]))
@@ -67,3 +68,13 @@
   (testing "ops forwards properties to the operator"
     (is (true? (bpy/ops "mesh.primitive_cube_add" {:location [1 2 3]})))
     (is (= [1.0 2.0 3.0] (bpy/pos (last (bpy/objects)))))))
+
+(ffi/defcfn set-kx-running! "ujs_test_set_kx_running" [:bool] :void)
+
+(deftest viewport-refused-during-a-game
+  (testing "the viewport is the running game's canvas: changing it is refused"
+    (set-kx-running! true)
+    (try
+      (is (thrown-with-msg? Exception #"while a game is running"
+            (bpy/viewport! {:shading "RENDERED"})))
+      (finally (set-kx-running! false)))))
