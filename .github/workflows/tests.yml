@@ -20,15 +20,27 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install jolt
-        # release downloads from GitHub occasionally 5xx; retry before failing
+        # Through the API with the job token: the public release-download
+        # URL the install script uses has been returning 504s on runners.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -fsSL --retry 3 -o install.sh \
-            "https://raw.githubusercontent.com/jolt-lang/jolt/v${JOLT_VERSION}/install"
+          case "$RUNNER_OS" in
+            Linux) target=x86_64-linux ;;
+            macOS) target=aarch64-macos ;;
+          esac
+          asset="jolt-v${JOLT_VERSION}-${target}.tar.gz"
           for attempt in 1 2 3; do
-            bash install.sh --version "$JOLT_VERSION" --dir "$HOME/.local/bin" && break
+            gh release download "v${JOLT_VERSION}" -R jolt-lang/jolt \
+              -p "$asset" -p "$asset.sha256" -D "$RUNNER_TEMP/jolt" --clobber && break
             [ "$attempt" = 3 ] && exit 1
             sleep $((attempt * 15))
           done
+          cd "$RUNNER_TEMP/jolt"
+          shasum -a 256 -c "$asset.sha256"
+          tar -xzf "$asset"
+          mkdir -p "$HOME/.local/bin"
+          install -m 755 "jolt-v${JOLT_VERSION}-${target}/jolt" "$HOME/.local/bin/jolt"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - run: jolt --version
