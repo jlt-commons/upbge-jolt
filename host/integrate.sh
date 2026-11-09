@@ -202,6 +202,194 @@ src = src.replace(old, old + "  info.builtins(BuiltinBits::VERTEX_ID); /* upbge-
 open(path, "w").write(src)
 PY
 
+# --- 2D filters: bgl_DepthTexture is a depth-stencil texture, which Metal
+# can't read through a float texture2d (it read another texture's leftovers);
+# declare it Depth2D like Blender's own shaders. And accept the GLSL of
+# classic BGE filters (texture2D, gl_TexCoord[0], gl_FragColor), which only
+# GL drivers forgave and Metal's translation rejects.
+grep -q "upbge-jolt: depth sampler" "$RSH" || python3 - "$RSH" <<'PY'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old_depth = '  info.sampler(9, ImageType::Float2D, "bgl_DepthTexture");\n'
+new_depth = ('  info.sampler(9, ImageType::Depth2D, "bgl_DepthTexture"); /* upbge-jolt: depth sampler */\n'
+             '  info.builtins(BuiltinBits::FRAG_COORD); /* gl_FragCoord, which filters often use */\n')
+old_ver = '''  // Remove redundant #version directive.
+  const size_t pos = prog.find("#version");'''
+new_ver = '''  /* upbge-jolt: legacy GLSL, classic BGE filters' built-ins */
+  {
+    static const std::pair<const char *, const char *> legacy[] = {
+        {"texture2DLod", "textureLod"},
+        {"texture2D", "texture"},
+        {"gl_FragColor", "fragColor"},
+        {"gl_TexCoord[0]", "bgl_TexCoord"},
+    };
+    auto ident = [](char c) { return std::isalnum((unsigned char)c) || c == '_'; };
+    /* .st/.stpq texture-coordinate swizzles: MSL only has xyzw/rgba */
+    for (size_t at = prog.find('.'); at != std::string::npos; at = prog.find('.', at + 1)) {
+      size_t end = at + 1;
+      while (end < prog.size() && std::strchr("stpq", prog[end]) && prog[end] != '\\0') {
+        end++;
+      }
+      const size_t n = end - at - 1;
+      if (n >= 1 && n <= 4 && at > 0 && (ident(prog[at - 1]) || prog[at - 1] == ']' || prog[at - 1] == ')') &&
+          (end >= prog.size() || !ident(prog[end])))
+      {
+        for (size_t i = at + 1; i < end; i++) {
+          prog[i] = "xyzw"[std::strchr("stpq", prog[i]) - "stpq"];
+        }
+      }
+    }
+    for (const auto &[from, to] : legacy) {
+      const size_t n = strlen(from);
+      for (size_t at = prog.find(from); at != std::string::npos; at = prog.find(from, at)) {
+        const bool whole = (at == 0 || !ident(prog[at - 1])) &&
+                           (from[n - 1] == ']' || at + n >= prog.size() || !ident(prog[at + n]));
+        if (whole) {
+          prog.replace(at, n, to);
+          at += strlen(to);
+        }
+        else {
+          at += n;
+        }
+      }
+    }
+  }
+
+  // Remove redundant #version directive.
+  const size_t pos = prog.find("#version");'''
+for old in (old_depth, old_ver):
+    if src.count(old) != 1:
+        sys.exit("integrate.sh: filter shader code not found in " + path)
+src = src.replace(old_depth, new_depth, 1).replace(old_ver, new_ver, 1)
+open(path, "w").write(src)
+PY
+
+# --- 2D filters: a filter binds bgl_RenderedTexture/bgl_DepthTexture only if
+# the shader has a uniform location for them, and Metal gives samplers none
+# (location -1, binding only), so every filter sampled an unbound texture and
+# drew black. Use the sampler binding for those two instead.
+R2F="$UPBGE/source/gameengine/Rasterizer/RAS_2DFilter.cpp"
+grep -q "upbge-jolt: sampler binding" "$R2F" || python3 - "$R2F" <<'PY'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old = '''    m_predefinedUniforms[i] = GetUniformLocation(predefinedUniformsName[i], false);
+  }
+'''
+if old not in src:
+    sys.exit("integrate.sh: predefined uniform loop not found in " + path)
+new = old + '''  /* upbge-jolt: sampler binding, samplers have no location on Metal */
+  m_predefinedUniforms[RENDERED_TEXTURE_UNIFORM] = GPU_shader_get_sampler_binding(
+      m_shader, predefinedUniformsName[RENDERED_TEXTURE_UNIFORM].c_str());
+  m_predefinedUniforms[DEPTH_TEXTURE_UNIFORM] = GPU_shader_get_sampler_binding(
+      m_shader, predefinedUniformsName[DEPTH_TEXTURE_UNIFORM].c_str());
+'''
+src = src.replace(old, new, 1)
+open(path, "w").write(src)
+PY
+
+# --- game render: after the scene, DRW_game_render_loop ran the editor's
+# post-view drawing (gizmos, region info with the camera passepartout,
+# annotations) into the overlay framebuffer, which a game never shows. Those
+# draws use GPU_DEPTH_NONE, which on Metal still writes depth, so they
+# overwrote the scene depth outside the camera frame and 2D filters reading
+# bgl_DepthTexture got the passepartout and gizmos. Games keep the BGE debug
+# draw and region callbacks, without the editor UI.
+DRWC="$UPBGE/source/blender/draw/intern/draw_context.cc"
+grep -q "upbge-jolt: game post-scene" "$DRWC" || python3 - "$DRWC" <<'PY'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old_call = '''  draw_ctx.engines_draw_scene();
+  drw_callbacks_post_scene(draw_ctx);
+
+  draw_ctx.release_data();
+
+  GPU_viewport_unbind(viewport);
+}
+'''
+new_call = '''  draw_ctx.engines_draw_scene();
+  drw_callbacks_post_scene_game(draw_ctx);
+
+  draw_ctx.release_data();
+
+  GPU_viewport_unbind(viewport);
+}
+'''
+anchor = 'void DRW_game_render_loop(bContext *C,\n'
+func = '''/* upbge-jolt: game post-scene, no editor UI (it would overwrite scene depth) */
+static void drw_callbacks_post_scene_game(DRWContext &draw_ctx)
+{
+  DRW_submission_start();
+  RegionView3D *rv3d = draw_ctx.rv3d;
+  DefaultFramebufferList *dfbl = DRW_context_get()->viewport_framebuffer_list_get();
+  GPU_framebuffer_bind(dfbl->overlay_fb);
+  GPU_matrix_projection_set(rv3d->winmat);
+  GPU_matrix_set(rv3d->viewmat);
+  /* nothing here may touch the scene depth that 2D filters read */
+  GPU_depth_mask(false);
+
+  drw_debug_draw_bge(draw_ctx.scene);
+  GPU_matrix_projection_set(rv3d->winmat);
+  GPU_matrix_set(rv3d->viewmat);
+
+  if (draw_ctx.evil_C) {
+    GPU_depth_test(GPU_DEPTH_NONE);
+    GPU_depth_mask(false);
+    GPU_apply_state();
+    ED_region_draw_cb_draw(draw_ctx.evil_C, draw_ctx.region, REGION_DRAW_POST_VIEW);
+    draw::command::StateSet::set();
+  }
+  GPU_depth_test(GPU_DEPTH_LESS_EQUAL);
+  GPU_depth_mask(true);
+  DRW_submission_end();
+  draw::command::StateSet::set();
+}
+
+'''
+if src.count(old_call) != 1 or src.count(anchor) != 1:
+    sys.exit("integrate.sh: game render loop not found in " + path)
+src = src.replace(old_call, new_call, 1).replace(anchor, func + anchor, 1)
+open(path, "w").write(src)
+PY
+
+# --- 2D filter passes: RemoveFilterPass dropped the filter without freeing it
+# (its shader, UBO and offscreen leaked on every removal), AddFilter leaked a
+# filter it replaced, and dereferenced a null filter when creation failed.
+R2M="$UPBGE/source/gameengine/Rasterizer/RAS_2DFilterManager.cpp"
+grep -q "upbge-jolt: filter ownership" "$R2M" || python3 - "$R2M" <<'PY'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old_add = '''  RAS_2DFilter *filter = CreateFilter(filterData);
+
+  m_filters[filterData.filterPassIndex] = filter;
+'''
+new_add = '''  RAS_2DFilter *filter = CreateFilter(filterData);
+  /* upbge-jolt: filter ownership, the manager frees what it replaces */
+  if (filter == nullptr) {
+    return nullptr;
+  }
+  RemoveFilterPass(filterData.filterPassIndex);
+
+  m_filters[filterData.filterPassIndex] = filter;
+'''
+old_rm = '''  m_filters.erase(passIndex);
+'''
+new_rm = '''  RAS_PassTo2DFilter::iterator it = m_filters.find(passIndex);
+  if (it != m_filters.end()) {
+    delete it->second;
+    m_filters.erase(it);
+  }
+'''
+for old in (old_add, old_rm):
+    if src.count(old) != 1:
+        sys.exit("integrate.sh: filter manager code not found in " + path)
+src = src.replace(old_add, new_add, 1).replace(old_rm, new_rm, 1)
+open(path, "w").write(src)
+PY
+
 # --- fixed frame rate: sleep between frames instead of spinning -------------
 # UPBGE commented the sleep out, so a game busy-waits a whole core between
 # frames. Restore it: sleep until 2ms before the next frame, spin the rest.

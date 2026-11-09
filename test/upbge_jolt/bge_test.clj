@@ -30,7 +30,10 @@
 (deftest filter-type-validation
   (testing "an unknown filter type is rejected before reaching the engine"
     (is (thrown-with-msg? Exception #"unknown filter type"
-          (bge/add-filter! 0 :glow)))))
+          (bge/add-filter! 0 :glow))))
+  (testing "motion blur is not offered: UPBGE has no motion-blur filter"
+    (is (thrown-with-msg? Exception #"unknown filter type"
+          (bge/add-filter! 0 :motion-blur)))))
 
 (deftest mouse-look-step
   (let [step (fn [st pos warped?] (bge/mouse-look-step st pos warped?))]
