@@ -20,9 +20,15 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install jolt
+        # release downloads from GitHub occasionally 5xx; retry before failing
         run: |
-          curl -fsSL "https://raw.githubusercontent.com/jolt-lang/jolt/v${JOLT_VERSION}/install" \
-            | bash -s -- --version "$JOLT_VERSION" --dir "$HOME/.local/bin"
+          curl -fsSL --retry 3 -o install.sh \
+            "https://raw.githubusercontent.com/jolt-lang/jolt/v${JOLT_VERSION}/install"
+          for attempt in 1 2 3; do
+            bash install.sh --version "$JOLT_VERSION" --dir "$HOME/.local/bin" && break
+            [ "$attempt" = 3 ] && exit 1
+            sleep $((attempt * 15))
+          done
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - run: jolt --version
