@@ -84,7 +84,9 @@ script is safe to rerun. It:
 (`native/mock_shim.c`). The mock models what the bridge relies on: typed
 properties, a scene collection, Empty-versus-mesh objects, a game-running
 flag, audio handle state, and data generations. Behaviour that needs the
-real engine is verified live over nREPL.
+real engine is verified live over nREPL. CI runs `jolt test` on Linux
+(x86_64) and macOS (arm64) for every push to main and every pull request
+(`.github/workflows/tests.yml`).
 Checks for the live engine are kept in `test/live/`: load one over nREPL
 while a game runs, for example `(load-file "test/live/filters.clj")`, which
 returns `{:failed []}` when every 2D filter compiles and runs.

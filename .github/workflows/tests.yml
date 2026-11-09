@@ -1,0 +1,31 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # The jolt layers against the mock shim. The real shim needs a UPBGE
+    # build and a GPU, so engine behaviour is checked live (test/live/).
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      JOLT_VERSION: 0.8.25
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install jolt
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/jolt-lang/jolt/v${JOLT_VERSION}/install" \
+            | bash -s -- --version "$JOLT_VERSION" --dir "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - run: jolt --version
+
+      - name: Tests
+        run: jolt test
