@@ -1039,10 +1039,11 @@ readouts; parent text objects to the camera to keep them on screen).
 
 `(add-filter! index type)` `(add-filter! index type glsl)`
 
-Add 2D filter pass `index`: a built-in type (:blur :sharpen :grayscale
-:sepia :invert :sobel :prewitt :laplacian :dilation :erosion
-:motion-blur) or :custom with a GLSL fragment program reading
-bgl_RenderedTexture.
+Add 2D filter pass `index` (passes run in index order): a built-in type
+(:blur :sharpen :grayscale :sepia :invert :sobel :prewitt :laplacian
+:dilation :erosion) or :custom with a GLSL fragment program that writes
+fragColor from bgl_RenderedTexture and bgl_DepthTexture at
+bgl_TexCoord.xy. See docs/game-logic.md.
 
 ### `remove-filter!`
 

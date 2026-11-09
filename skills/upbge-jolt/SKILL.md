@@ -126,6 +126,11 @@ In `main.clj`:
   `use_raytracing` off and `taa_samples` low for play, and check
   `(:fps (bge/frame-info))`. Do bulk mesh edits with `b/foreach-set!`
   (positions, `material_index`), not per-element calls.
+- Post-processing: `(bge/add-filter! 0 :sepia)`, or `:custom` with a GLSL
+  program writing `fragColor` from `texture(bgl_RenderedTexture,
+  bgl_TexCoord.xy)` (and `bgl_DepthTexture` for depth effects); set its
+  `uniform float`s with `bge/filter-uniform!`. Add filters in main.clj;
+  they end with the game. Details in `docs/game-logic.md`.
 - Sound: `(audio/play (audio/lowpass (audio/tone :sawtooth 55) 500 1)
   {:loop? true})`, then call `audio/pitch!` and `audio/volume!` per frame.
 
@@ -163,6 +168,5 @@ make sure `(game/errors)` is empty. See `docs/releasing.md`.
 
 ## Known limitations
 
-2D filters (`bge/add-filter!`) don't render correctly on macOS/Metal, so use
-EEVEE settings for the look. There are no overlay scenes: build HUDs from
-text objects parented to the camera. See `docs/troubleshooting.md`.
+There are no overlay scenes: build HUDs from text objects parented to the
+camera. See `docs/troubleshooting.md`.

@@ -60,12 +60,23 @@ script is safe to rerun. It:
 - adds and links the shim into Blender and the player, and compiles it with
   the game engine's defines (the KX classes' layout and vtables depend on
   `WITH_PYTHON` and others);
+- adds the startup hook in Blender's `main` (`uj_host_start`) and
+  initialises the runtime in the player;
 - hooks the game-loop tick and the stop flag;
-- requests `gl_VertexID` for the 2D-filter shader (needed on Metal);
+- restores the game's frame-limiter sleep, and stops the Metal backend
+  spinning a core while it waits for the GPU;
+- fills every swap-chain buffer before a game starts, so the editor doesn't
+  flicker while the game runs;
+- makes 2D filters work on Metal: `gl_VertexID` and `gl_FragCoord` for the
+  filter shaders, the rendered and depth textures bound by sampler binding
+  (Metal samplers have no uniform location), depth read through a depth
+  sampler, classic BGE GLSL translated, and filter passes freed when
+  removed or replaced;
+- keeps the editor's post-view drawing (gizmos, camera passepartout) out of
+  a game's render, where on Metal it overwrote the scene depth;
 - fixes the build on current macOS: the clang `[[deprecated]]` on a type, an
   EEVEE shader identifier that is a Metal keyword, the epoxy link for the
-  game engine, and the draco target;
-- initialises the runtime in the player.
+  game engine, and the draco target.
 
 ## Tests
 
@@ -74,3 +85,6 @@ script is safe to rerun. It:
 properties, a scene collection, Empty-versus-mesh objects, a game-running
 flag, audio handle state, and data generations. Behaviour that needs the
 real engine is verified live over nREPL.
+Checks for the live engine are kept in `test/live/`: load one over nREPL
+while a game runs, for example `(load-file "test/live/filters.clj")`, which
+returns `{:failed []}` when every 2D filter compiles and runs.

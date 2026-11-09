@@ -34,6 +34,11 @@ pump runs between viewport frames, so a viewport frame that takes seconds
 delays every eval (see "Editor or game is slow" below); the game pumps from
 its loop.
 
+**`filter N failed to compile (GLSL error, see the console)`**
+Blender's stderr has the shader compiler's message, with line numbers in
+the generated source. On macOS the GLSL is translated to Metal, so names
+the filter shader doesn't declare (other `gl_*` built-ins) fail there.
+
 **The viewport doesn't change**
 Check the shading is Rendered or Material (`bpy/viewport!`) and the view is
 through the right camera. Displacement and the world only show when
@@ -57,12 +62,6 @@ the editor. Common causes:
 
 ## Known limitations
 
-- **2D filters on macOS (Metal).** `bge/add-filter!` compiles after the
-  `VERTEX_ID` fix, but filters render a blank frame, and custom GLSL fails
-  Metal translation. Use EEVEE settings for the look instead: TAA, ray
-  tracing, fast GI, shadows, volumetrics, and AgX or Filmic view transforms.
-  Bloom is only available as a compositor Glare node, which the game doesn't
-  run.
 - **Overlay scenes.** UPBGE 0.5 has no `addScene`. Build HUDs from text
   objects and planes parented to the camera.
 - **Releases** are packaged for macOS only, and are ad-hoc signed.

@@ -115,6 +115,42 @@ HUD and capture:
 Through it, light energy, material node values and other data can be changed
 while the game runs.
 
+## 2D filters
+
+Full-screen post-processing passes, run in pass order after the scene
+renders. Built-in: `:blur :sharpen :grayscale :sepia :invert :sobel
+:prewitt :laplacian :dilation :erosion`.
+
+```clojure
+(bge/add-filter! 0 :sepia)
+(bge/add-filter! 1 :custom
+  "uniform float strength;
+   void main() {
+     vec2 uv = bgl_TexCoord.xy;
+     vec4 c = texture(bgl_RenderedTexture, uv);
+     float v = smoothstep(0.9, 0.3, length(uv - 0.5));
+     fragColor = vec4(c.rgb * mix(1.0 - strength, 1.0, v), c.a);
+   }")
+(bge/filter-uniform! 1 "strength" 0.45)   ; per frame if it changes
+(bge/remove-filter! 1)
+```
+
+A custom program writes `fragColor` and can read:
+
+- `bgl_RenderedTexture` (the frame so far) and `bgl_DepthTexture` (scene
+  depth, 0 near to 1 far) at `bgl_TexCoord.xy`;
+- `bgl_RenderedTextureWidth`/`Height` and `bgl_TextureCoordinateOffset[9]`
+  (the 3x3 neighbourhood, for kernels);
+- `gl_FragCoord`;
+- its own `uniform float`/`vec2`/`vec3`/`vec4`, set with `filter-uniform!`.
+  A uniform the program doesn't use is compiled out, and setting it is an
+  error.
+
+Classic BGE filter code (`texture2D`, `gl_TexCoord[0].st`, `gl_FragColor`)
+is accepted as written. Filters run on the scene-referred image, before the
+view transform, so keep colors in linear terms. Filters are dropped when the
+game ends; add them from main.clj or `on-start!`.
+
 ## Shaders driven from game code
 
 Feed per-frame game state into materials through the object's `color`

@@ -30,6 +30,45 @@ against the running editor or game:
 items by name or index, `b/foreach-get`/`b/foreach-set!` move bulk data
 (vertex coordinates, UVs, pixels). Enums take identifiers (`"SUN"`).
 
+## Features
+
+- **Live REPL in the engine.** An nREPL server runs inside Blender (editor,
+  game, or headless) and inside released games; `.nrepl-port` is written for
+  editors and agents to find. No Python is involved: a C startup hook in
+  Blender's `main` loads the runtime.
+- **The whole RNA data model.** Typed get/set on any property (arrays,
+  enums by identifier, pointers), collections and lookups, bulk
+  `foreach-get`/`foreach-set!`, RNA function calls (`bpy.data.*.new`, node
+  trees, links), and operators with properties and an editor-area context.
+  The viewport updates as you edit.
+- **Scene building.** Meshes from vertex and face lists, materials and
+  shader node graphs (`upbge-jolt.nodes`), lights, cameras, worlds,
+  EEVEE settings, save and open.
+- **Safe pointers.** Pointers held across a file load, undo or game end are
+  refused with a clear error instead of crashing the engine.
+- **Game logic in Clojure.** The game's `main.clj` is stored in the .blend
+  and runs on every start; per-frame handlers with error isolation,
+  hot-swappable from the REPL while the game runs.
+- **Game runtime (`upbge-jolt.bge`).** Transforms, physics (forces,
+  impulses, velocity, damping), raycasts, parenting, spawning, cameras,
+  keyboard and mouse, pointer-locked mouse look, text objects for HUDs,
+  screenshots, frame timing.
+- **2D filters.** The built-in post-processing passes and custom GLSL
+  filters with the rendered image, scene depth and uniforms, working on
+  macOS/Metal; classic BGE filter code runs as written.
+- **Audio (`upbge-jolt.audio`).** Tones, noise and sound files, low/high-pass
+  filters, mixing, looping playback with per-frame pitch and volume.
+- **Shaders driven from game code** through object color, without
+  recompiling materials each frame.
+- **Releases.** `host/release.sh` packages a .blend, the player and the
+  runtime as a standalone macOS app.
+- **Light on the machine.** Games sleep between frames, the editor idles at
+  a few percent of a core, and a watchdog drops a GPU-bound viewport to
+  Solid instead of letting it lock up the REPL.
+
+See [the yacht example](example/yacht/README.md) for all of it in one game,
+built by an agent over nREPL.
+
 ## Documentation
 
 [`docs/`](docs/README.md): getting started, building scenes, game logic,
@@ -223,51 +262,6 @@ and session threads are jolt's own; scene-touching work from a session
 marshals onto the host thread via the op queue — `core/marshal` enqueues the
 work and blocks the caller on an ebb dataflow variable, and `uj_tick` drains
 it on the frame. Reentrant calls (from inside a tick-drained op) run inline.
-
-## Status
-
-- [x] Op queue + tick + nREPL start/stop/eval — tested headlessly
-- [x] Thread marshalling: bridge calls run on the host tick thread via
-      `core/marshal` (ebb dataflow variable), reentrant inline — tested with a
-      tick-pump thread
-- [x] Bridge: typed get/set, arrays (fixed + dynamic), enums, pointers,
-      collections, introspection — against the mock shim
-- [x] Creation: `id-new` / `mesh-from-pydata!` / `coll-add!` / `coll-remove!`
-      (create meshes, build geometry, link objects into the scene graph) —
-      against the mock shim; the real shim's DNA/BKE code is unverified
-- [x] `--library` build + C harness (init/tick/eval/repl/rebind) — 14 checks
-- [x] Real shim over RNA (host/upbgejolt_shim.cc) — compiles, links and runs
-      against the live UPBGE engine: objects enumerate, get/set round-trips,
-      and `bpy/add!` creates + links a mesh object
-- [x] Operator layer: `ujs_operator_call` / `bridge/operator!` / `bpy/ops`
-      runs a named operator (`bpy.ops` equivalent, e.g.
-      "mesh.primitive_cube_add") — verified against the live engine
-- [x] Engine layer (frame events): `core/frame-flow` emits the tick count each
-      host frame as an ebb flow — the per-frame seam for driving the engine
-- [x] Engine layer (KX): `ujs_kx_*` / `upbge-jolt.bge` accesses the running
-      game's `KX_GameObject`s (name, world position) — verified against the
-      live game engine (windowed; the game loop pumps `uj_tick`)
-- [x] Editor-side pump (`bpy.app.timers`) for live editing in the windowed
-      editor; game-side tick from NextFrame
-- [x] bpy.data / bpy.context roots (resolved live, valid across file loads),
-      operators with properties and an editor-area context, generic RNA
-      function calls, collection lookup, bulk foreach get/set, int/bool
-      arrays, enums by identifier, save/open — verified against the live editor
-- [x] Game sessions: main.clj stored in the .blend and loaded on game start,
-      per-frame handlers with error isolation, start/stop from the REPL,
-      one-command play — verified across repeated start/stop cycles
-- [x] KX runtime: transforms, physics, raycasts, hierarchy, spawning,
-      cameras, input, mouse, screenshots — verified in the running game
-- [x] Audio (upbge-jolt.audio): tones, noise, files, low/high-pass, mix,
-      looping playback with per-frame pitch/volume on Blender's device
-- [x] Game text objects (`bge/text!`) for HUDs and instruments
-- [ ] 2D filters (`bge/add-filter!`): compile on Metal after the VERTEX_ID
-      engine fix, but render wrong (white/black) and custom GLSL fails Metal
-      translation; use EEVEE's TAA, ray tracing, fast GI, shadows,
-      volumetrics and AgX/Filmic view transforms (all over RNA) meanwhile
-- [x] Release builds: `host/release.sh` packages a .blend with the player
-      and runtime as a standalone app — verified running main.clj at 60 fps
-- unchecked box = in progress or planned
 
 ## License
 
