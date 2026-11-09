@@ -1120,8 +1120,9 @@
   [obj text]
   (on-host (with-ptr buf obj (or (ujs-kx-set-text buf (str text)) (host-error "text")))))
 
+;; RAS_2DFilterManager::FILTER_MODE (1, motion blur, is unimplemented upstream)
 (def ^:private filter-types
-  {:motion-blur 1 :blur 2 :sharpen 3 :dilation 4 :erosion 5 :laplacian 6
+  {:blur 2 :sharpen 3 :dilation 4 :erosion 5 :laplacian 6
    :sobel 7 :prewitt 8 :grayscale 9 :sepia 10 :invert 11 :custom 12})
 
 (defn kx-add-filter!
