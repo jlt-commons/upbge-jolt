@@ -299,44 +299,38 @@ src = src.replace(splash_old, """    /* Shows the splash as needed (not under up
 open(path, "w").write(src)
 PY
 
-# --- EEVEE: read shadow statistics from the oldest frame, never the newest --
-# Once viewport sampling finishes (every frame in a game) EEVEE swapped through
-# its 5-deep statistics swap-chain and read the newest buffer, a full CPU-GPU
-# sync per frame that keeps them from overlapping. The statistics only feed a
-# warning, so always read the oldest one.
-EVS="$UPBGE/source/blender/draw/engines/eevee/eevee_shadow.cc"
-grep -q "upbge-jolt: oldest statistics" "$EVS" || python3 - "$EVS" <<'PY'
+# --- game start: fill every swap-chain buffer with the editor UI -------------
+# The embedded game redraws only its viewport each frame. On Metal the window
+# cycles through several back buffers, so any buffer the editor UI was never
+# drawn into shows without it and the window flickers while the game runs.
+# Draw the whole window a few times right before the game loop starts.
+KXS="$UPBGE/source/gameengine/BlenderRoutines/BL_KetsjiEmbedStart.cpp"
+grep -q "upbge-jolt: fill swap chain" "$KXS" || python3 - "$KXS" <<'PY'
 import sys
 path = sys.argv[1]
 src = open(path).read()
-old = """    if (inst_.sampling.finished_viewport()) {
-      /* Swap enough to read the last one. */
-      for (int i = 0; i < statistics_buf_.size(); i++) {
-        statistics_buf_.swap();
+old = """    launcher.InitEngine();
+
+    CM_Message(std::endl << "Blender Game Engine Started");"""
+new = """    launcher.InitEngine();
+
+    /* upbge-jolt: fill swap chain. The game redraws only its viewport, so
+     * make sure every back buffer holds the full UI before it takes over. */
+    for (int pass = 0; pass < 3; pass++) {
+      blender::wmWindow *uj_win = CTX_wm_window(C);
+      if (uj_win == nullptr) {
+        break;
       }
+      blender::bScreen *uj_screen = blender::WM_window_get_active_screen(uj_win);
+      ED_screen_areas_iter (uj_win, uj_screen, uj_area) {
+        blender::ED_area_tag_redraw(uj_area);
+      }
+      blender::WM_redraw_windows(C);
     }
-    else {
-      statistics_buf_.swap();
-    }
-    statistics_buf_.current().read();
-    ShadowStatistics stats = statistics_buf_.current();
-"""
-new = """    /* upbge-jolt: oldest statistics. Always read the end of the swap-chain
-     * (reading the newest forces a full GPU sync), and only once every 60
-     * frames: on Metal any read waits for all in-flight GPU work, so a read
-     * per frame keeps the CPU and GPU from ever overlapping. The statistics
-     * only feed these warnings, which keep showing the last reading. */
-    statistics_buf_.swap();
-    static int frames_since_read = 60;
-    static ShadowStatistics stats = {};
-    if (++frames_since_read >= 60) {
-      frames_since_read = 0;
-      statistics_buf_.current().read();
-      stats = statistics_buf_.current();
-    }
-"""
+
+    CM_Message(std::endl << "Blender Game Engine Started");"""
 if old not in src:
-    sys.exit("integrate.sh: shadow statistics swap not found in " + path)
+    sys.exit("integrate.sh: launcher start not found in " + path)
 open(path, "w").write(src.replace(old, new, 1))
 PY
 
