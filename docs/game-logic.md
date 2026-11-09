@@ -6,9 +6,9 @@ talks to the running engine through `upbge-jolt.bge`.
 ## main.clj: the game's code in the .blend
 
 The game's code lives in a Text datablock named `main.clj` inside the .blend,
-so saving the scene saves its logic. It is evaluated (in the `user`
-namespace) when each game starts: from the viewport, `(game/start!)`,
-`host/play.sh`, or a released app.
+so saving the scene saves its logic. It is evaluated in the `user`
+namespace when each game starts, whether from the viewport,
+`(game/start!)`, `host/play.sh`, or a released app.
 
 ```clojure
 (game/set-main-file! "/abs/path/main.clj")   ; store a source file in the scene
@@ -37,14 +37,14 @@ file, and store it before saving.
   objects it captured. Register them from `main.clj` or an `on-start!` hook.
 - A handler that throws is removed, and its error is kept in
   `(game/errors)`. The others keep running.
-- Keyed registration replaces: re-evaluating `(game/on-frame! :spin ...)`
+- Keyed registration replaces. Re-evaluating `(game/on-frame! :spin ...)`
   at the REPL hot-swaps the running handler.
 
 When the game ends, UPBGE restores the pre-game scene. Edits made to Blender
 data during the game are undone, and pointers held from before or during the
-game become stale: look them up again.
+game become stale, so look them up again.
 
-## The runtime API (bge)
+## The bge runtime API
 
 Game objects come from `(bge/object "Name")` or `(bge/objects)`. Every call
 validates its object, so a handle to a removed object or one from an earlier
@@ -60,8 +60,8 @@ run raises instead of crashing.
 ```
 
 Physics needs a physics type on the Blender object, set before the game
-starts: `(b/set! (b/get obj "game") "physics_type" "RIGID_BODY")` (or
-`"DYNAMIC"`, `"STATIC"`, `"CHARACTER"`, `"NO_COLLISION"`).
+starts with `(b/set! (b/get obj "game") "physics_type" "RIGID_BODY")`.
+`"DYNAMIC"`, `"STATIC"`, `"CHARACTER"` and `"NO_COLLISION"` also work.
 
 ```clojure
 (bge/velocity boat)  (bge/velocity! boat [0 5 0] :local)
@@ -92,15 +92,16 @@ Input uses bge event names: `"WKEY"`, `"LEFTSHIFTKEY"`, `"SPACEKEY"`,
 (bge/mouse! 0.5 0.5)               ; recenter each frame for mouse look
 ```
 
-Mouse look: call `(bge/mouse-look)` once per frame. It returns this frame's
-movement `[dx dy]`, normalised to the window size. On first use it locks the
-pointer, which hides and grabs it: Blender wraps the cursor at the window
-edges and keeps positions continuous, so differences between frames are pure
-mouse motion and a still mouse always reads zero. `(bge/release-mouse-look!)`
-releases it (bind it to Esc), the next call re-locks, and the lock is always
-released when the game ends. Warping the cursor to the centre by hand
-(`bge/mouse!`) is unreliable: the warp is ignored while the window isn't
-focused, and the new position only reads back on the next frame.
+Call `(bge/mouse-look)` once per frame for mouse look. It returns this
+frame's movement `[dx dy]`, normalised to the window size. On first use it
+locks the pointer, which hides and grabs it. Blender then wraps the cursor
+at the window edges and keeps positions continuous, so differences between
+frames are pure mouse motion and a still mouse always reads zero.
+`(bge/release-mouse-look!)` releases the lock, which you want on Esc, and
+the next call re-locks. The lock is always released when the game ends.
+Warping the cursor to the centre by hand with `bge/mouse!` is unreliable.
+The warp is ignored while the window isn't focused, and the new position
+only reads back on the next frame.
 
 HUD and capture:
 
@@ -137,24 +138,24 @@ renders. Built-in: `:blur :sharpen :grayscale :sepia :invert :sobel
 
 A custom program writes `fragColor` and can read:
 
-- `bgl_RenderedTexture` (the frame so far) and `bgl_DepthTexture` (scene
-  depth, 0 near to 1 far) at `bgl_TexCoord.xy`;
-- `bgl_RenderedTextureWidth`/`Height` and `bgl_TextureCoordinateOffset[9]`
-  (the 3x3 neighbourhood, for kernels);
-- `gl_FragCoord`;
+- `bgl_RenderedTexture`, the frame so far, and `bgl_DepthTexture`, the scene
+  depth from 0 near to 1 far, both read at `bgl_TexCoord.xy`.
+- `bgl_RenderedTextureWidth` and `Height`, plus
+  `bgl_TextureCoordinateOffset[9]`, the 3x3 neighbourhood for kernels.
+- `gl_FragCoord`.
 - its own `uniform float`/`vec2`/`vec3`/`vec4`, set with `filter-uniform!`.
   A uniform the program doesn't use is compiled out, and setting it is an
   error.
 
-Classic BGE filter code (`texture2D`, `gl_TexCoord[0].st`, `gl_FragColor`)
-is accepted as written. Filters run on the scene-referred image, before the
-view transform, so keep colors in linear terms. Filters are dropped when the
-game ends; add them from main.clj or `on-start!`.
+Classic BGE filter code, meaning `texture2D`, `gl_TexCoord[0].st` and
+`gl_FragColor`, is accepted as written. Filters run on the scene-referred
+image, before the view transform, so keep colors in linear terms. They are
+dropped when the game ends, so add them from main.clj or `on-start!`.
 
 ## Shaders driven from game code
 
-Feed per-frame game state into materials through the object's `color`
-(RGBA). The shader reads it as a uniform, and changing it doesn't invalidate
+Feed per-frame game state into materials through the object's `color`, which
+is RGBA. The shader reads it as a uniform, and changing it doesn't invalidate
 the compiled material:
 
 ```clojure
@@ -169,25 +170,25 @@ the compiled material:
 
 Setting a Value node's `default_value` every frame also works, but it makes
 EEVEE regenerate the material from its node tree every frame. That costs
-real CPU for large trees (an ocean or sky graph), so reserve `nodes/value!`
-for values that change rarely.
+real CPU for large trees like an ocean or sky graph, so reserve
+`nodes/value!` for values that change rarely.
 
-This was verified in the running game at 60 fps, for two uses:
+Two uses were verified in the running game at 60 fps.
 - **Waves on CPU and GPU from one function.** Write the Gerstner function in
-  the shader nodes (EEVEE displacement), with time from `color.r`, and the
+  the shader nodes as EEVEE displacement, with time from `color.r`, and the
   same function in Clojure for buoyancy sampling.
 - **Masks.** A moving transparency footprint keeps the sea out of a hull.
 
 ## Performance
 
-- A game at a fixed frame rate sleeps between frames (`integrate.sh`
-  restores the frame limiter UPBGE had commented out). An idle scene uses
+- A game at a fixed frame rate sleeps between frames, since `integrate.sh`
+  restores the frame limiter UPBGE had commented out. An idle scene uses
   about 15% of a core at 60 fps, and the editor about 2% when idle.
 - The game renders with EEVEE every frame, so ray tracing and high
   `taa_samples` are the main costs. Measure with `(bge/frame-info)`, and keep
   `use_raytracing` off and `taa_samples` low for play.
-- Do bulk mesh edits with `b/foreach-set!` (vertex positions,
-  `material_index`), not per-element calls.
+- Do bulk mesh edits with `b/foreach-set!` on things like vertex positions
+  and `material_index`, not per-element calls.
 
 ## Audio
 
@@ -199,5 +200,6 @@ This was verified in the running game at 60 fps, for two uses:
 (audio/stop! engine)
 ```
 
-Tones (`:sine :sawtooth :square :triangle`), noise and files, shaped with
-`lowpass`, `highpass`, `volume` and `mix`, play on Blender's output device.
+Tones are `:sine`, `:sawtooth`, `:square` and `:triangle`, alongside noise
+and files. Shape them with `lowpass`, `highpass`, `volume` and `mix`.
+Everything plays on Blender's output device.

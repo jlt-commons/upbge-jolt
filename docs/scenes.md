@@ -1,8 +1,8 @@
 # Building scenes
 
 Scene work goes through Blender's RNA, the same data model `bpy` exposes to
-Python. A pointer is a map `{:owner :type :data :gen}`; properties are read
-and written by their RNA names.
+Python. A pointer is a map `{:owner :type :data :gen}`, and properties are
+read and written by their RNA names.
 
 ## Reading and writing properties
 
@@ -19,11 +19,11 @@ and written by their RNA names.
 ```
 
 Writes run the property's RNA update, as `bpy` does, so the viewport, the
-properties editor and dependent data update immediately.
+properties editor and dependent data all update immediately.
 
-Roots: `(b/root)` is the context scene, `(b/data)` is `bpy.data`, and
-`(b/context)` is `bpy.context`. All three resolve live, so they stay valid
-across file loads.
+There are three roots. `(b/root)` is the context scene, `(b/data)` is
+`bpy.data`, and `(b/context)` is `bpy.context`. All three resolve live, so
+they stay valid across file loads.
 
 ## Collections and functions
 
@@ -39,12 +39,13 @@ across file loads.
 (b/call (b/get (b/data) "objects") "remove" {:object obj :do_unlink true})
 ```
 
-`b/call` takes keyword arguments and returns the function's result: a
-pointer, number, string or vector. It covers the RNA API: `nodes.new`,
+`b/call` takes keyword arguments and returns the function's result, which
+is a pointer, number, string or vector. It covers the RNA API: `nodes.new`,
 `links.new`, `modifiers.new`, `images.new`, `texts.new`, `from_string`,
 `select_set`, and so on. Python-only helpers such as
-`bpy_prop_collection.find` and `keyframe_insert` are not RNA and are not available (set
-keyframes through `animation_data` and F-curves, or drive values from frame handlers).
+`bpy_prop_collection.find` and `keyframe_insert` are not RNA, so they are
+not available. Set keyframes through `animation_data` and F-curves instead,
+or drive values from frame handlers.
 
 ## Meshes
 
@@ -52,10 +53,11 @@ keyframes through `animation_data` and F-curves, or drive values from frame hand
 (bpy/add! "Ramp" [[0 0 0] [4 0 0] [4 2 1] [0 2 1]] [[0 1 2 3]])  ; verts + faces
 ```
 
-`bpy/add!` builds the mesh (from_pydata, with edges computed), creates an
-object typed from its data, and links it into the scene. For lofted surfaces
-(hulls, terrain), generate the vertex grid and the quads in Clojure. Bulk
-attribute data moves with `b/foreach-get` and `b/foreach-set!`:
+`bpy/add!` builds the mesh with from_pydata and computed edges, creates an
+object typed from its data, and links it into the scene. For lofted
+surfaces like hulls or terrain, generate the vertex grid and the quads in
+Clojure. Bulk attribute data moves with `b/foreach-get` and
+`b/foreach-set!`:
 
 ```clojure
 (def m (b/get (bpy/object "Ramp") "data"))
@@ -71,10 +73,11 @@ attribute data moves with `b/foreach-get` and `b/foreach-set!`:
 ```
 
 Properties are given as a map and parsed by each property's RNA type.
-`{:area "VIEW_3D"}` (or `"NODE_EDITOR"`, `"IMAGE_EDITOR"`, ...) runs the
-operator in that editor's context, which operators that poll for a 3D view
-need. A failure reports the operator's own message or poll error. Operators
-act on the selection and the active object, so set those first:
+Passing `{:area "VIEW_3D"}` runs the operator in that editor's context,
+which operators that poll for a 3D view need. `"NODE_EDITOR"` and
+`"IMAGE_EDITOR"` work the same way. A failure reports the operator's own
+message or poll error. Operators act on the selection and the active
+object, so set those first:
 
 ```clojure
 (b/call obj "select_set" {:state true})
@@ -100,7 +103,7 @@ cannot fail a poll.
 (nodes/assign! (bpy/object "Sea") mat)
 ```
 
-EEVEE vertex displacement (waves, terrain) needs
+EEVEE vertex displacement, for waves or terrain, needs
 `(b/set! mat "displacement_method" "DISPLACEMENT")` and a Displacement node
 on the output. Transparency uses `(b/set! mat "surface_render_method"
 "DITHERED")`.
@@ -124,7 +127,7 @@ The game renders with EEVEE, so these settings carry into it.
 ## Seeing your work
 
 The editor's viewport shows the scene live. `(bpy/viewport! {:shading
-"RENDERED" :camera? true})` switches shading and the camera view; call it
+"RENDERED" :camera? true})` switches shading and the camera view. Call it
 again after replacing the scene camera. For a still image:
 
 ```clojure
@@ -139,11 +142,13 @@ again after replacing the scene camera. For a still image:
 (bpy/open! "/abs/path/scene.blend")
 ```
 
-Keep the code that builds a scene in files (for example `build.clj`) and the
-game code in `main.clj`, stored in the .blend (see [game logic](game-logic.md)).
-A later session, human or agent, resumes from the .blend plus those files.
-Text datablocks (`(b/call (b/get (b/data) "texts") "new" {:name "notes.edn"})`
-and `from_string`) carry extra state inside the .blend.
+Keep the code that builds a scene in files, `build.clj` for example, and
+the game code in `main.clj`, stored in the .blend. See [game
+logic](game-logic.md) for that side. A later session, human or agent,
+resumes from the .blend plus those files. Text datablocks carry extra state
+inside the .blend: create them with `(b/call (b/get (b/data) "texts")
+"new" {:name "notes.edn"})` and fill them with `from_string`.
 
-After a file load, undo, or a game ending, re-look-up anything you held:
-older pointers are refused as stale (see [architecture](architecture.md)).
+After a file load, an undo, or a game ending, re-look-up anything you held,
+because older pointers are refused as stale. See
+[architecture](architecture.md) for why.
