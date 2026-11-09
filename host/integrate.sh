@@ -316,10 +316,24 @@ old = """    if (inst_.sampling.finished_viewport()) {
     }
     else {
       statistics_buf_.swap();
-    }"""
-new = """    /* upbge-jolt: oldest statistics. Always read the end of the swap-chain:
-     * reading the newest forces a full GPU sync every frame. */
-    statistics_buf_.swap();"""
+    }
+    statistics_buf_.current().read();
+    ShadowStatistics stats = statistics_buf_.current();
+"""
+new = """    /* upbge-jolt: oldest statistics. Always read the end of the swap-chain
+     * (reading the newest forces a full GPU sync), and only once every 60
+     * frames: on Metal any read waits for all in-flight GPU work, so a read
+     * per frame keeps the CPU and GPU from ever overlapping. The statistics
+     * only feed these warnings, which keep showing the last reading. */
+    statistics_buf_.swap();
+    static int frames_since_read = 60;
+    static ShadowStatistics stats = {};
+    if (++frames_since_read >= 60) {
+      frames_since_read = 0;
+      statistics_buf_.current().read();
+      stats = statistics_buf_.current();
+    }
+"""
 if old not in src:
     sys.exit("integrate.sh: shadow statistics swap not found in " + path)
 open(path, "w").write(src.replace(old, new, 1))

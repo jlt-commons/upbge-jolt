@@ -1,44 +1,32 @@
 # Yacht demo: progress
 
 Task: `example/PROMPT.md`. Work is done live over nREPL (see
-`skills/upbge-jolt/SKILL.md` and `docs/`). Written by the session supervisor
-after the second agent session was stopped, since that session didn't write
-its own notes.
+`skills/upbge-jolt/SKILL.md` and `docs/`).
 
 ## Files
 
 - `yacht.blend`: the scene, with `main.clj` stored in it (saved 2026-11-08
-  18:49, after the second session). Open it in the editor to resume.
-- `build.clj` (ns `yacht-build`, `(yacht-build/build!)`): ocean, sky, sun,
-  HeroCam, look settings. **Done; don't retune.** The wave set is stored in
-  the .blend as the Text `ocean-waves.edn`.
-- `yacht.clj` (ns `yacht`, `(y/build!)`, `(y/materials!)`): the yacht. It
-  builds a lofted deep-V hull and teak deck, a coachroof with side windows, a
-  wraparound windscreen, a hardtop, a radar arch with dome, antennas and
-  bimini, rails and stanchions, cleats, anchor, windlass and bow roller, nav
-  lights, flag, swim platform with ladder and shower, a cockpit lounge with
-  table and wet bar, a helm (console, two MFDs, compass, wheel, throttles,
-  seats) and a sunpad. Below deck it builds the interior shell with windows,
-  bulkheads, doors, a saloon (sofa, table, TV), galley, master cabin (bed,
-  lamps, wardrobe), a head (vanity, mirror, toilet, shower), LED strips,
-  interior lights and portholes. Cameras: HelmCam, ChaseCam, WalkCam,
-  OrbitCam, IntroCam. HUD: Y-HUD, Y-Help and MFD text objects. Everything is
-  parented to the hull object `Y-Yacht`.
-- `main.clj` (ns `yacht-main`): the game logic. The yacht follows the same
-  wave sum as the ocean shader (heave, pitch, roll) and main.clj owns speed,
-  heading and planing attitude. The player walks in the yacht's local frame.
-  Keys: E (helm on/off), W/S throttle, A/D steer, WASD + Shift walk, mouse
-  look, C helm/chase camera, O orbit/photo, T time of day, H hide UI, P
-  screenshot, F1 help, 1/2/3, Esc. There's an intro on start.
-- `shot-intro.png`, `shot-walk.png`, `shot-walk2.png`: the last in-game
-  screenshots.
+  21:35). Open it in the editor to resume.
+- `build.clj` (ns `yacht-build`): ocean, sky, sun, HeroCam, look settings.
+  Wave set is the Text `ocean-waves.edn`. `(yacht-build/build!)` rebuilds the
+  sea scene; `(yacht-build/tune!)` re-applies the play settings and the ocean
+  tuning to an existing scene without a rebuild.
+- `yacht.clj` (ns `yacht`, `(y/build!)`, `(y/materials!)`): the yacht. `build!`
+  deletes all `Y-*` objects and rebuilds; it also (re)creates the
+  `Y-WaveParams` empty and the ocean hull mask.
+- `main.clj` (ns `yacht-main`): the game logic. Keys: E (helm on/off), W/S
+  throttle, A/D steer, WASD + Shift walk, mouse look, C helm/chase camera,
+  O orbit/photo, T time of day, H hide UI, P screenshot, F1 help, 1/2/3, Esc.
+- `screenshots/`: showcase stills `01-hero-exterior`, `02-side-profile`,
+  `03-saloon-interior`, `04-helm`, `05-cockpit-lounge`, and time of day
+  `06-golden-hour`, `07-midday`, `08-sunset`, `09-night`. (Root `*.png` is
+  git-ignored; the `screenshots/` folder is not.)
 
 ## Resume
 
 1. Open the scene in the editor: `host/run.sh editor $PWD/example/yacht/yacht.blend`
-2. Connect over nREPL. Rebuilding the yacht from code is
-   `(load-file ".../example/yacht/yacht.clj") (y/build!)`, but the .blend
-   already holds the result.
+2. Connect over nREPL. The .blend already holds the built scene; to re-apply
+   the current tuning to it, `(load-file ".../build.clj") (yacht-build/tune!)`.
 3. Play: `(game/start!)`, then `(game/errors)`, screenshots, `(game/stop!)`.
    Or `host/play.sh example/yacht/yacht.blend`.
 4. After edits to main.clj: `(game/set-main-file! ".../main.clj")` and
@@ -46,48 +34,64 @@ its own notes.
 
 ## Next
 
-1. **Performance: stop setting Value nodes every frame.** `frame!` in
-   main.clj (around line 349) sets five shader Value nodes each frame: wave
-   time, and the hull mask's x, y, z and yaw. Each set makes EEVEE regenerate
-   the ocean material from its large node tree every frame. Feed them through
-   object colors instead with `nodes/object-params!`. The Ocean's color can
-   carry time, mask x, mask y and yaw; z or a second set can come from
-   another object. See `docs/game-logic.md`, "Shaders driven from game code".
-2. Check the play experience end to end in a fresh game: intro skip, walk
-   all rooms, stairs, doors, the helm and driving, the cameras, time of day.
-3. Remaining PROMPT.md items: the guest cabin, wake and spray, audio (the
-   engine, water and wind with `upbge-jolt.audio`), night lighting, quality
-   setting, and the 10 screenshots from PROMPT.md section 10.
-4. Write the README for the demo, per PROMPT.md section 9.
+1. Play through in a fresh game: intro skip, walk every room, stairs, doors,
+   the helm and driving, the cameras, time of day. Mouse warp still needs a
+   person to confirm it (see Known problems).
+2. Remaining PROMPT.md items: the guest cabin, wake and spray, audio polish
+   (engine/water/wind already exist via `upbge-jolt.audio`), dedicated night
+   lighting, a quality setting, and finalising the 10 screenshots.
+3. Write the README for the demo (PROMPT.md section 9).
+
+## Session 5 summary
+
+- **Waves restored.** The `Ocean` material's `displacement_method` had been
+  left on BUMP; it is back on DISPLACEMENT with `max_vertex_displacement` 2.0,
+  so the same wave sum moves geometry and the CPU heave/pitch/roll match it.
+- **Per-frame Value nodes eliminated.** Wave time now arrives as the Ocean
+  object's `color.r` (`nodes/object-params!`), and the hull mask reads
+  `Y-WaveParams`' Object texture coordinates; main.clj moves that empty with
+  the yacht. Nothing rewrites a Value node per frame, so EEVEE no longer
+  regenerates the ocean material every frame. `build.clj`/`yacht.clj` were
+  ported to this design (validated on a scratch material: 13 time links, a
+  `HullMask` node feeding Alpha, displacement from the wave sum) so a rebuild
+  reproduces the live material.
+- **Framerate.** The ocean fragment shader is the frame cost (hiding it gives
+  ~60 fps). Cutting the LOD noise octaves (ripple 7->3, ripple2 24->4,
+  foam 5->3) recovered ~8 fps. Play render is 720p, `taa_samples` 8,
+  `use_fast_gi` off. Measured 39.0 fps average (min 35.9, max 42.2) over 26 s
+  at the boarding view, looking forward over the water.
+- **Scene fixes.** Bimini raised 0.62 m (yacht.clj z offset 2.90 -> 3.52, and
+  the saved mesh raised to match). Aft interior bulkhead given a companionway
+  header instead of a solid wall; forward bulkhead added so the master cabin
+  no longer looks through the hull into the sea; interior lights 22 -> 55 W
+  with shadows off. Stair region widened to -5.36 (the deck hole starts at
+  -5.35, so a 5 cm floorless sliver blocked the stairs). Saloon sofa moved
+  +0.85 m forward to clear the stair landing, with main.clj's obstacle and the
+  start position updated.
+- **Time of day.** `Y-WorldDay`, `Y-WorldSunset`, `Y-WorldNight` are tuned
+  copies of the golden `SeaWorld` (night adds stars and a moon); T cycles them.
 
 ## Known problems
 
-- **Fixed in session 4:** the GPU cost of the ocean. The Ocean is now 2.4 km
-  and 5.7k vertices, casts no shadow, and HeroCam's clip_end is 4 km. The
-  editor's Rendered view is responsive again (54 ticks/s at ~3% CPU).
-- **The ocean material was switched from DISPLACEMENT to BUMP** to save GPU.
-  The waves are now a lighting effect and no longer move geometry, which
-  breaks PROMPT.md's "same wave function on CPU and GPU" visually. Restore
-  displacement on the smaller ocean if fps allows, or displace only a
-  near-camera patch.
-- **Game fps is GPU-bound and varies with the view, 3-30 fps** (CPU ~5%).
-  Measure over at least 25 s after any settings change: shader recompiles
-  skew the average, and the intro camera's view changes the cost. Candidates:
-  shadow-casting objects, the number of point lights, `use_fast_gi`,
-  `taa_samples`.
-- **main.clj still sets Value nodes every frame** (wave time and the hull
-  mask). Move them to `nodes/object-params!`.
-- **Session 4's Blender crashed** in the game's render, right after the live
-  view's shading was changed while a game was running. `bpy/viewport!` now
-  refuses that; stop the game first.
-- Mouse warp (`bge/mouse!`) didn't take effect while the game window lacked
-  the cursor, which made mouse look spin. main.clj guards against it. A
-  person needs to check this in play.
-- Setting materials one polygon at a time was very slow (49 s). Use bulk
+- **GPU-bound on the ocean.** ~39 fps at 720p in the default view; the sea
+  fragment shader dominates, geometry displacement is not the cost. Further
+  gains will need fewer noise octaves, simpler bump, or a smaller world-space
+  LOD, not fewer vertices. Measure over at least 25 s after any change:
+  shader recompiles skew the average and the intro camera changes the cost.
+- Mouse warp (`bge/mouse!`) didn't take effect when the game window lacked the
+  cursor, which made mouse look spin. main.clj guards against it; a person
+  needs to confirm in an interactive play session.
+- Setting materials one polygon at a time is very slow; use bulk
   `foreach-set!` on `material_index`.
-- Long builds can exceed the agent's nREPL request timeout. Split them into
-  smaller evaluations.
+- Long builds can exceed the agent's nREPL request timeout. Split them.
+- `bpy/viewport!` refuses to change shading while a game is running (session 4
+  crashed Blender by doing it). Stop the game first.
 
 ## API gaps noted
 
-- None blocking. See "Known problems".
+- `bge/camera` does not exist; use `bge/camera!` / `bge/object`.
+- `b/length` does not exist; use `b/coll-count`.
+- `aget-double` / `aset-double` are not available. `foreach-get` returns a
+  double array and `foreach-set!` takes a seq/vector.
+- Assigning `location` on a live KX object does not stick (KX world position
+  overrides it); edit mesh vertices, or use `bge/move!`/`bge/orient!`.

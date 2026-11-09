@@ -92,7 +92,10 @@
         nt  (nodes/tree mat)
         out (nodes/find nt "Material Output")
         bsdf (nodes/find nt "Principled BSDF")
-        time (nodes/value! nt "time" 0.0)
+        ;; Wave time is the Ocean object's colour.r, set each frame by main.clj
+        ;; via nodes/object-params!. A Value node would make EEVEE regenerate
+        ;; this whole tree every frame.
+        time (:r (nodes/object-params! nt))
         geo (nodes/node! nt "ShaderNodeNewGeometry")
         pos (nodes/socket geo :out "Position")
         sep (nodes/node! nt "ShaderNodeSeparateXYZ")
@@ -120,12 +123,16 @@
                     (if acc (math nt "ADD" acc h) h)))
                 nil
                 waves)
-        ;; level-of-detail ripples and foam noise, both animated by time
+        ;; level-of-detail ripples and foam noise, both animated by time.
+        ;; Detail is deliberately low: four noise octaves across a full-screen
+        ;; ocean is what used to make the game fragment-bound (~30 fps at 8-10).
+        ;; The displaced geometry carries the large shape; the noise is only
+        ;; fine sparkle, so 3-4 octaves look the same and run much faster.
         wslow (math nt "MULTIPLY" time 0.18)
         wfast (math nt "MULTIPLY" time 0.42)
-        ripple (noise nt "ripple" 7.0 8.0 0.60 0.50 wslow)
-        ripple2 (noise nt "ripple2" 24.0 10.0 0.55 0.70 wfast)
-        foamn (noise nt "foam" 5.0 6.0 0.70 0.30 (math nt "MULTIPLY" time 0.05))
+        ripple (noise nt "ripple" 7.0 3.0 0.60 0.50 wslow)
+        ripple2 (noise nt "ripple2" 24.0 4.0 0.55 0.70 wfast)
+        foamn (noise nt "foam" 5.0 3.0 0.70 0.30 (math nt "MULTIPLY" time 0.05))
         dist (vector-length nt pos)
         distf (map-range nt dist 250.0 6500.0 0.0 1.0)
         crest (map-range nt height -0.04 0.48 0.0 1.0)
@@ -326,14 +333,18 @@
         vs (b/get sc "view_settings")
         rto (b/get ee "ray_tracing_options")]
     (b/set! rs "engine" "BLENDER_EEVEE")
-    (b/set! rs "resolution_x" 1920)
-    (b/set! rs "resolution_y" 1080)
+    ;; 720p for play. The ocean fragment shader is the whole frame cost, so
+    ;; play resolution is the cheapest knob; stills render at taa_render_samples.
+    (b/set! rs "resolution_x" 1280)
+    (b/set! rs "resolution_y" 720)
     (b/set! rs "resolution_percentage" 100)
     (b/set! rs "fps" 60)
     (b/set! rs "film_transparent" false)
     (b/set! (b/get rs "image_settings") "file_format" "PNG")
-    ;; EEVEE quality
-    (b/set! ee "taa_samples" 32)
+    ;; EEVEE quality for play. 8 TAA samples is enough with the displaced sea;
+    ;; measured the same fps as 16/32 in game because the ocean shader, not
+    ;; TAA, is the bottleneck.
+    (b/set! ee "taa_samples" 8)
     (b/set! ee "taa_render_samples" 64)
     (b/set! ee "use_shadows" true)
     (b/set! ee "use_shadow_jitter_viewport" true)
@@ -343,7 +354,7 @@
     (b/set! ee "use_raytracing" true)
     (b/set! rto "use_denoise" true)
     (b/set! rto "trace_max_roughness" 0.6)
-    (b/set! ee "use_fast_gi" true)
+    (b/set! ee "use_fast_gi" false)
     (b/set! ee "clamp_surface_indirect" 10.0)
     ;; photographic tone mapping
     (b/set! vs "view_transform" "AgX")
@@ -375,9 +386,203 @@
       (b/call t "from_string" {:text (pr-str waves)}))
     {:scene sc :sky sky :sun sun :camera cam :ocean ocean :material mat}))
 
+;; --- times of day -----------------------------------------------------------
+;; main.clj switches scene.world to one of these names for the T key. Each is a
+;; copy of the golden SeaWorld with the gradient constants, sun disc and glow
+;; retuned, so the node graph stays identical and cheap to build.
+
+(defn- socket-color! [nt node-name input rgba]
+  (when-let [n (nodes/find nt node-name)]
+    (b/set! (nodes/socket n :in input) "default_value" rgba)))
+
+(defn- add-night-stars!
+  "Add a sparse starfield and a small moon to a copied world graph, then feed
+  the result to the Background color."
+  [nt]
+  (let [gen (nodes/socket (nodes/find nt "Texture Coordinate") :out "Generated")
+        scale (nodes/node! nt "ShaderNodeVectorMath" {:props {"operation" "MULTIPLY"}})
+        _ (set-in nt gen scale 0)
+        _ (set-in nt [220.0 220.0 220.0] scale 1)
+        wn (nodes/node! nt "ShaderNodeTexWhiteNoise" {:props {"noise_dimensions" "3D"}})
+        _ (set-in nt (nodes/socket scale :out "Vector") wn "Vector")
+        sr (nodes/node! nt "ShaderNodeMapRange" {:props {"clamp" true}})
+        _ (set-in nt (nodes/socket wn :out "Value") sr "Value")
+        _ (set-in nt 0.994 sr "From Min")
+        _ (set-in nt 0.9999 sr "From Max")
+        _ (set-in nt 0.0 sr "To Min")
+        _ (set-in nt 1.0 sr "To Max")
+        ;; moon: a small disc in one direction
+        dot (vdot nt gen [0.35 -0.55 0.76])
+        mr (nodes/node! nt "ShaderNodeMapRange" {:props {"clamp" true}})
+        _ (set-in nt dot mr "Value")
+        _ (set-in nt 0.99972 mr "From Min")
+        _ (set-in nt 0.99992 mr "From Max")
+        _ (set-in nt 0.0 mr "To Min")
+        _ (set-in nt 3.2 mr "To Max")
+        sky (nodes/socket (nodes/find nt "Mix (Legacy).009") :out "Color")
+        add (nodes/node! nt "ShaderNodeMixRGB" {:props {"blend_type" "ADD"}})
+        stars (nodes/socket sr :out "Result")
+        moon (nodes/socket mr :out "Result")
+        fac (nodes/node! nt "ShaderNodeMath" {:props {"operation" "ADD"}})
+        _ (set-in nt stars fac 0)
+        _ (set-in nt moon fac 1)
+        _ (set-in nt 1.0 add "Fac")
+        _ (set-in nt sky add "Color1")
+        _ (set-in nt [0.90 0.93 1.0 1.0] add "Color2")
+        _ (set-in nt (nodes/socket fac :out "Value") add "Fac")
+        bg (nodes/find nt "Background")]
+    (set-in nt (nodes/socket add :out "Color") bg "Color")))
+
+(defn build-time-worlds!
+  "Create Y-WorldDay, Y-WorldSunset and Y-WorldNight as tuned copies of the
+  golden SeaWorld, then leave the scene on SeaWorld. Idempotent."
+  []
+  (let [base (b/lookup (bpy/data) "worlds" "SeaWorld")
+        worlds (b/get (bpy/data) "worlds")
+        presets
+        [{:name "Y-WorldDay" :elev 55.0 :rot 60.0 :disc true
+          :halo [1.0 0.88 0.65 1.0]
+          :hor-away [0.42 0.60 0.93 1.0] :hor-sun [1.0 0.94 0.80 1.0]
+          :c1 [0.30 0.52 0.95 1.0] :c2 [0.06 0.22 0.60 1.0]
+          :zen [0.02 0.09 0.32 1.0]
+          :glow-tint [1.0 0.94 0.82 1.0] :glow-mult [0.30 0.30 0.30 1.0]}
+         {:name "Y-WorldSunset" :elev 2.0 :rot 250.0 :disc true
+          :halo [1.0 0.45 0.12 1.0]
+          :hor-away [0.24 0.18 0.38 1.0] :hor-sun [1.30 0.46 0.10 1.0]
+          :c1 [0.38 0.22 0.38 1.0] :c2 [0.07 0.05 0.20 1.0]
+          :zen [0.02 0.02 0.10 1.0]
+          :glow-tint [1.0 0.48 0.16 1.0] :glow-mult [0.22 0.22 0.22 1.0]}
+         {:name "Y-WorldNight" :elev 28.0 :rot 200.0 :disc true
+          :halo [0.18 0.22 0.36 1.0]
+          :hor-away [0.020 0.030 0.070 1.0] :hor-sun [0.040 0.055 0.110 1.0]
+          :c1 [0.012 0.020 0.050 1.0] :c2 [0.005 0.009 0.028 1.0]
+          :zen [0.002 0.004 0.014 1.0]
+          :glow-tint [0.55 0.62 0.90 1.0] :glow-mult [0.05 0.05 0.05 1.0]
+          :stars true}]]
+    (doseq [p presets]
+      (when-let [old (b/lookup (bpy/data) "worlds" (:name p))]
+        (b/call worlds "remove" {:world old}))
+      (let [w (b/call base "copy")
+            _ (b/set! w "name" (:name p))
+            nt (nodes/tree w)
+            sky (nodes/find nt "Sky Texture")]
+        (b/set! sky "sun_elevation" (* (/ (double (:elev p)) 180.0) Math/PI))
+        (b/set! sky "sun_rotation" (* (/ (double (:rot p)) 180.0) Math/PI))
+        (b/set! sky "sun_disc" (:disc p))
+        (b/set! sky "sun_size" 0.0095)
+        (socket-color! nt "Mix (Legacy)" "Color2" (:halo p))
+        (socket-color! nt "Mix (Legacy).001" "Color1" (:hor-away p))
+        (socket-color! nt "Mix (Legacy).001" "Color2" (:hor-sun p))
+        (socket-color! nt "Mix (Legacy).002" "Color2" (:c1 p))
+        (socket-color! nt "Mix (Legacy).003" "Color2" (:c2 p))
+        (socket-color! nt "Mix (Legacy).004" "Color2" (:zen p))
+        (socket-color! nt "Mix (Legacy).005" "Color2" (:glow-tint p))
+        (socket-color! nt "Mix (Legacy).007" "Color2" (:glow-mult p))
+        (when (:stars p) (add-night-stars! nt))))
+    (b/set! (bpy/scene) "world" base)
+    (println "worlds:" (map bpy/name-of (b/coll (bpy/data) "worlds")))))
+
+;; --- interior fixes ---------------------------------------------------------
+;; The saved scene predates two hull-interior fixes in yacht.clj: the aft
+;; bulkhead had no companionway opening (the stairs dead-ended into a wall the
+;; player walked through), and the forward end of the interior was open, so
+;; from the master cabin you saw straight through the backface-culled hull into
+;; the sea. This patches the live scene without a full yacht rebuild.
+
+(defn- add-local-box!
+  [name p0 p1 mat root]
+  (let [[x0 y0 z0] p0 [x1 y1 z1] p1
+        v [[x0 y0 z0] [x1 y0 z0] [x1 y1 z0] [x0 y1 z0]
+           [x0 y0 z1] [x1 y0 z1] [x1 y1 z1] [x0 y1 z1]]
+        f [[0 3 2 1] [4 5 6 7] [0 1 5 4] [2 3 7 6] [3 0 4 7] [1 2 6 5]]
+        o (bpy/add! name v f)]
+    (when mat (nodes/assign! o mat))
+    (when root (b/set! o "parent" root))
+    o))
+
+(defn fix-interior!
+  "Patch the interior of the existing scene: open the companionway through the
+  aft bulkhead, add the forward bulkhead, warm up the practical lights.
+  Idempotent."
+  []
+  (let [root (bpy/object "Y-Yacht")
+        walnut (b/lookup (bpy/data) "materials" "Y-Walnut")]
+    (when-let [a (bpy/object "Y-BulkAftA")] (bpy/delete! a))
+    (when-not (bpy/object "Y-BulkAftHeader")
+      (add-local-box! "Y-BulkAftHeader" [-1.72 -2.30 1.35] [-0.60 -2.24 1.54] walnut root))
+    (when-not (bpy/object "Y-BulkFwd")
+      (add-local-box! "Y-BulkFwd" [-1.72 6.04 -0.36] [1.72 6.12 1.54] walnut root))
+    (doseq [nm ["Y-IntLightSalon" "Y-IntLightGalley" "Y-IntLightMaster" "Y-IntLightHead"]]
+      (when-let [o (bpy/object nm)]
+        (let [d (b/get o "data")]
+          (b/set! d "energy" 55.0)
+          (b/set! d "use_shadow" false))))
+    (println "interior patched; lights"
+             (mapv (fn [nm] (b/get (b/get (bpy/object nm) "data") "energy"))
+                   ["Y-IntLightSalon" "Y-IntLightGalley" "Y-IntLightMaster" "Y-IntLightHead"]))))
+
+(defn- move-mesh-y! [nm dy]
+  (when-let [o (bpy/object nm)]
+    (let [mesh (b/get o "data")
+          n (* 3 (b/coll-count mesh "vertices"))
+          co (b/foreach-get mesh "vertices" "co" n)
+          co2 (vec (map-indexed (fn [i v] (if (= 1 (mod i 3)) (+ dy (double v)) (double v))) co))]
+      (b/foreach-set! mesh "vertices" "co" co2)
+      (b/call mesh "update"))))
+
+(defn fix-stairs-landing!
+  "The port saloon sofa ended right where the companionway stairs land, so the
+  player could not step off the bottom step. Shift the whole sofa group forward
+  by 0.85 m, leaving a landing; main.clj's sofa obstacle moves with it.
+  Idempotent only with the marker stored in the scene."
+  []
+  (if (bpy/object "Y-SofaMoved")
+    (println "sofa already moved")
+    (do (doseq [o (bpy/objects)
+                :let [nm (bpy/name-of o)]
+                :when (str/starts-with? nm "Y-Sofa")]
+          (move-mesh-y! nm 0.85))
+        (let [mark (bpy/add! "Y-SofaMoved" [[0.0 0.0 0.0] [0.01 0.0 0.0] [0.0 0.01 0.0]] [[0 1 2]])]
+          (b/set! mark "hide_viewport" true)
+          (b/set! mark "hide_render" true))
+        (println "sofa moved +0.85 y"))))
+
+(defn tune-ocean!
+  "Apply the session-5 wave/performance settings to an existing Ocean material:
+  real vertex displacement is back on, and the fine noise uses 3-4 octaves.
+  Idempotent; safe to re-run after opening the saved .blend."
+  []
+  (let [mat (b/lookup (bpy/data) "materials" "Ocean")
+        nt (nodes/tree mat)]
+    (b/set! mat "displacement_method" "DISPLACEMENT")
+    (b/set! mat "max_vertex_displacement" 2.0)
+    (doseq [[nm d] [["ripple" 3.0] ["ripple2" 4.0] ["foam" 3.0]]]
+      (when-let [n (nodes/find nt nm)]
+        (b/set! (nodes/socket n :in "Detail") "default_value" d)))
+    (println "ocean:"
+             (b/get mat "displacement_method")
+             "noise detail ripple/ripple2/foam"
+             (mapv (fn [nm] (b/get (nodes/socket (nodes/find nt nm) :in "Detail") "default_value"))
+                   ["ripple" "ripple2" "foam"]))))
+
+(defn tune!
+  "Apply the play-quality render settings and the ocean tuning to the current
+  scene without rebuilding it."
+  []
+  (tune-ocean!)
+  (fix-interior!)
+  (fix-stairs-landing!)
+  (setup-render! (bpy/scene))
+  (println "render:"
+           (b/get (b/get (bpy/scene) "render") "resolution_x")
+           "x" (b/get (b/get (bpy/scene) "render") "resolution_y")
+           "taa" (b/get (b/get (bpy/scene) "eevee") "taa_samples")
+           "fastgi" (b/get (b/get (bpy/scene) "eevee") "use_fast_gi")))
+
 (defn save! []
   (bpy/save! "/Users/yogthos/src/jlt-commons/upbge-jolt/example/yacht/yacht.blend"))
 
 (comment
   (build!)
+  (tune!)
   (save!))

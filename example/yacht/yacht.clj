@@ -519,7 +519,7 @@
         pts (vec (for [i (range (inc ny))
                        :let [t (/ (double i) ny)
                              y (lerp y0 y1 t)
-                             z (+ 2.90 (* 0.66 t))]]
+                             z (+ 3.52 (* 0.66 t))]]
                    (for [j (range (inc nx))
                          :let [x (lerp (- xw) xw (/ (double j) nx))
                                sag (* 0.055 (- 1.0 (Math/pow (/ x xw) 2)))]]
@@ -712,10 +712,14 @@
         (box! (str "Y-WinHead" side) [(* side (- xw 0.03)) -2.1 (- win-z1 0.05)]
               [(* side (+ xw 0.03)) 1.15 win-z1] (:oak mats) root)))
     ;; bulkheads
-    ;; aft bulkhead (with companionway opening at port)
-    (box! "Y-BulkAftA" [(- xw) y0 zf] [-0.60 (+ y0 0.06) zc] (:walnut mats) root)
+    ;; aft bulkhead: the port side is the companionway opening the stairs come
+    ;; down through, with a header above it. (A solid panel here dead-ended the
+    ;; stairs and the player walked through a visible wall.)
+    (box! "Y-BulkAftHeader" [(- xw) y0 1.35] [-0.60 (+ y0 0.06) zc] (:walnut mats) root)
     (box! "Y-BulkAftB" [-0.60 y0 zf] [xw (+ y0 0.06) zc] (:walnut mats) root)
-    ;; step down opening: just cut the aft bulkhead above the stairs
+    ;; forward bulkhead closes the interior at the bow end: without it you see
+    ;; straight out through the backface-culled hull into the sea.
+    (box! "Y-BulkFwd" [(- xw) 6.04 zf] [xw 6.12 zc] (:walnut mats) root)
     ;; saloon / galley-head bulkhead at y=1.25
     (box! "Y-BulkGalleyA" [(- xw) 1.22 zf] [-0.62 1.30 zc] (:walnut mats) root)
     (box! "Y-BulkGalleyB" [0.62 1.22 zf] [xw 1.30 zc] (:walnut mats) root)
@@ -822,61 +826,59 @@
       (torus! (str "Y-PortRim" side y) [x y z] [side 0.0 0.0] 0.13 0.022 16 6 (:steel mats) root)
       (superellipsoid! (str "Y-PortGlass" side y) [x y z] 0.02 0.11 0.11 0.8 0.8 14 8 (:glass mats) root))))
 
-(defn add-hull-mask!
-  "Add the yacht-footprint water exclusion to the ocean material, driven by
-  YachtX/YachtY/YachtYaw value nodes (updated per frame by main.clj)."
+(defn wave-params!
+  "The empty the ocean's hull mask reads Object coordinates from. main.clj
+  moves it with the yacht every frame, so its local space is the hull's."
   []
-  (let [mat (b/lookup (bpy/data) "materials" "Ocean")
-        nt (nodes/tree mat)
-        out (nodes/find nt "Material Output")
-        bsdf (nodes/find nt "Principled BSDF")
-        geo (or (nodes/find nt "Geometry") (nodes/node! nt "ShaderNodeNewGeometry"))]
-    (if (nodes/find nt "YachtX")
-      mat
-      (let [_ nil
-        pos (nodes/socket geo :out "Position")
-        vx (nodes/value! nt "YachtX" 24.0)
-        vy (nodes/value! nt "YachtY" -16.0)
-        vz (nodes/value! nt "YachtZ" 0.0)
-        vyaw (nodes/value! nt "YachtYaw" 0.0)
-        comb (nodes/node! nt "ShaderNodeCombineXYZ")
-        _ (set-in nt vx comb "X")
-        _ (set-in nt vy comb "Y")
-        _ (set-in nt vz comb "Z")
-        sub (nodes/node! nt "ShaderNodeVectorMath" {:props {"operation" "SUBTRACT"}})
-        _ (set-in nt pos sub 0)
-        _ (set-in nt (nodes/socket comb :out "Vector") sub 1)
-        rot (nodes/node! nt "ShaderNodeVectorRotate"
-                         {:props {"rotation_type" "Z_AXIS"}})
-        _ (set-in nt (nodes/socket sub :out "Vector") rot "Vector")
-        _ (set-in nt [0.0 0.0 0.0] rot "Center")
-        _ (set-in nt vyaw rot "Angle")
-        sep (nodes/node! nt "ShaderNodeSeparateXYZ")
-        _ (set-in nt (nodes/socket rot :out "Vector") sep "Vector")
-        sx (nodes/socket sep :out "X")
-        sy (nodes/socket sep :out "Y")
-        sq (fn [s]
-             (let [n (nodes/node! nt "ShaderNodeMath" {:props {"operation" "MULTIPLY"}})]
-               (set-in nt s n 0)
-               (set-in nt s n 1)
-               (nodes/socket n :out 0)))
-        m (fn [op a b]
-            (let [n (nodes/node! nt "ShaderNodeMath" {:props {"operation" op}})]
-              (when a (set-in nt a n 0))
-              (when b (set-in nt b n 1))
-              (nodes/socket n :out 0)))
-        ex (m "MULTIPLY" (sq (m "MULTIPLY" sx (/ 1.0 3.05))) 1.0)
-        ey (m "MULTIPLY" (sq (m "MULTIPLY" sy (/ 1.0 11.6))) 1.0)
-        e (m "ADD" ex ey)
-        alpha (let [n (nodes/node! nt "ShaderNodeMapRange" {:props {"clamp" true}})]
-                (set-in nt e n "Value")
-                (set-in nt 0.74 n "From Min")
-                (set-in nt 1.0 n "From Max")
-                (set-in nt 0.0 n "To Min")
-                (set-in nt 1.0 n "To Max")
-                (nodes/socket n :out "Result"))]
-    (set-in nt alpha bsdf "Alpha")
-    mat))))
+  (or (bpy/object "Y-WaveParams")
+      (let [o (b/object-new "Y-WaveParams" nil)]
+        (bpy/link! o)
+        (b/set! o "location" [24.0 -16.0 0.0])
+        o)))
+
+(defn add-hull-mask!
+  "Flatten the sea inside the yacht footprint. Hull-local coordinates come
+  from the Y-WaveParams empty's Object texture coordinates rather than a
+  per-frame transform uniform, so no Value node is rewritten per frame and
+  the material is never regenerated."
+  ([]
+   (add-hull-mask! (b/lookup (bpy/data) "materials" "Ocean")))
+  ([mat]
+   (let [nt (nodes/tree mat)
+         bsdf (nodes/find nt "Principled BSDF")
+         wp (wave-params!)
+         tc (or (nodes/find nt "Wave Coords")
+                (nodes/node! nt "ShaderNodeTexCoord" {:name "Wave Coords"}))]
+     (b/set! tc "object" wp)
+     (if (or (nodes/find nt "HullMask") (nodes/find nt "Map Range.005"))
+       mat
+       (let [sep (nodes/node! nt "ShaderNodeSeparateXYZ")
+             _ (nodes/link! nt tc "Object" sep "Vector")
+             sx (nodes/socket sep :out "X")
+             sy (nodes/socket sep :out "Y")
+             sq (fn [s]
+                  (let [n (nodes/node! nt "ShaderNodeMath" {:props {"operation" "MULTIPLY"}})]
+                    (set-in nt s n 0)
+                    (set-in nt s n 1)
+                    (nodes/socket n :out 0)))
+             m (fn [op a b]
+                 (let [n (nodes/node! nt "ShaderNodeMath" {:props {"operation" op}})]
+                   (when a (set-in nt a n 0))
+                   (when b (set-in nt b n 1))
+                   (nodes/socket n :out 0)))
+             ex (sq (m "MULTIPLY" sx (/ 1.0 3.05)))
+             ey (sq (m "MULTIPLY" sy (/ 1.0 11.6)))
+             e (m "ADD" ex ey)
+             alpha (let [n (nodes/node! nt "ShaderNodeMapRange"
+                                        {:props {"clamp" true} :name "HullMask"})]
+                     (set-in nt e n "Value")
+                     (set-in nt 0.74 n "From Min")
+                     (set-in nt 1.0 n "From Max")
+                     (set-in nt 0.0 n "To Min")
+                     (set-in nt 1.0 n "To Max")
+                     (nodes/socket n :out "Result"))]
+         (set-in nt alpha bsdf "Alpha")
+         mat)))))
 
 ;; ---------------------------------------------------------------------------
 ;; cameras, HUD text, build

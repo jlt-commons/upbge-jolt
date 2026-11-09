@@ -81,11 +81,12 @@
 ;; state + object cache
 ;; ---------------------------------------------------------------------------
 
-;; Start on the starboard side of the swim platform: at x=0 the stern flag pole
-;; is right in front of the eye. yaw is slightly to port so the transom steps
-;; and cockpit are in view.
-(def start-pos [1.25 -11.70 0.42])
-(def start-yaw 0.18)
+;; Start at the top of the transom steps, just inside the cockpit, looking
+;; forward over the lounge and helm to the bow. Standing down on the swim
+;; platform puts the eye at cockpit-sole height, so the first view was the back
+;; of the aft lounge; this is the same boarding spot one step up.
+(def start-pos [0.0 -9.80 1.65])
+(def start-yaw 0.0)
 
 (def S (atom
         {:t 0.0
@@ -152,7 +153,10 @@
     :f (fn [x y] (+ (roof-z y) 0.23))}
    {:n :interior :b (fn [x y] (and (>= y -2.28) (<= y 5.98) (<= (Math/abs (double x)) 1.45)))
     :f (fn [x y] -0.33)}
-   {:n :stairs :b (fn [x y] (in-rect x y -1.66 -0.80 -5.30 -2.20))
+   ;; -5.36 not -5.30: the deck's companionway hole starts at -5.35, and a
+   ;; narrower stair region left a 5 cm sliver inside the hole with no floor, so
+   ;; the player could not step onto the stairs at all.
+   {:n :stairs :b (fn [x y] (in-rect x y -1.66 -0.80 -5.36 -2.20))
     :f (fn [x y] (lerp 1.70 -0.33 (smooth (/ (- y -5.30) 3.10))))}])
 
 (defn floor-at
@@ -177,7 +181,7 @@
    [-0.26 0.48 -3.92 -3.20 1.50 2.75]   ; helm seat P
    [0.60 1.26 -3.92 -3.20 1.50 2.75]    ; helm seat S
    ;; interior
-   [-1.62 -0.70 -2.30 0.30 -0.42 0.80]  ; saloon sofa
+   [-1.62 -0.70 -1.45 1.15 -0.42 0.80]  ; saloon sofa (moved clear of the stair landing)
    [-0.50 0.70 -1.90 0.00 -0.42 0.66]   ; saloon table
    [-1.66 -0.60 1.30 3.02 -0.42 0.55]   ; galley
    [-1.72 -0.55 1.20 1.32 -0.42 1.60]   ; galley bulkhead left
