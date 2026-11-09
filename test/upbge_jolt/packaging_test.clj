@@ -10,3 +10,12 @@
   (let [deps (read-string (slurp "deps.edn"))]
     (is (not-any? #(re-find #"libupbge_shim" (pr-str %))
                   (:jolt/native deps)))))
+
+(deftest runtime-library-lives-under-native
+  ;; `jolt lib` writes the runtime (and jolt's .build dir beside it) into
+  ;; native/, and the launch and release scripts look for it there.
+  (let [lib-task (pr-str (get-in (read-string (slurp "deps.edn")) [:tasks 'lib]))]
+    (is (re-find #"\"native/libjolt_upbge\"" lib-task))
+    (is (not (re-find #"\"libjolt_upbge\"" lib-task))))
+  (doseq [script ["host/run.sh" "host/release.sh"]]
+    (is (re-find #"native/libjolt_upbge" (slurp script)) script)))

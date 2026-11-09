@@ -16,8 +16,8 @@ case "$MODE" in
   *) MODE=editor ;;
 esac
 case "$(uname -s)" in
-  Darwin) BLENDER="$ROOT/native/upbge/build_darwin/bin/Blender.app/Contents/MacOS/Blender"; LIB=libjolt_upbge.dylib ;;
-  *)      BLENDER="$ROOT/native/upbge/build_linux/bin/blender"; LIB=libjolt_upbge.so ;;
+  Darwin) BLENDER="$ROOT/native/upbge/build_darwin/bin/Blender.app/Contents/MacOS/Blender"; LIB=native/libjolt_upbge.dylib ;;
+  *)      BLENDER="$ROOT/native/upbge/build_linux/bin/blender"; LIB=native/libjolt_upbge.so ;;
 esac
 export UPBGE_JOLT="$MODE"
 export UPBGE_JOLT_LIB="${UPBGE_JOLT_LIB:-$ROOT/$LIB}"

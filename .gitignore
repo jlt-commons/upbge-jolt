@@ -1,7 +1,7 @@
-libjolt_upbge.dylib
-libjolt_upbge.dylib.build/
-libjolt_upbge.so
-libjolt_upbge.so.build/
+native/libjolt_upbge.dylib
+native/libjolt_upbge.dylib.build/
+native/libjolt_upbge.so
+native/libjolt_upbge.so.build/
 native/libupbge_shim.dylib
 native/libupbge_shim.so
 native/upbge/

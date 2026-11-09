@@ -22,7 +22,7 @@ OUT="${3:-$ROOT/release}"
 BIN="$ROOT/native/upbge/build_darwin/bin"
 PLAYER="$BIN/Blenderplayer.app/Contents/MacOS/Blenderplayer"
 RES="$BIN/Blender.app/Contents/Resources"
-LIB="$ROOT/libjolt_upbge.dylib"
+LIB="$ROOT/native/libjolt_upbge.dylib"
 
 [ "$(uname -s)" = Darwin ] || { echo "release.sh packages macOS apps only for now" >&2; exit 1; }
 for f in "$BLEND" "$PLAYER" "$LIB" "$RES/lib"; do

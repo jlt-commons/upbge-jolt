@@ -102,5 +102,5 @@
 
          lib
          {:doc "build libjolt_upbge.{dylib,so} via jolt build --library"
-          :task (do (shell "jolt" "build" "--library" "-m" "upbge-jolt.library" "-o" "libjolt_upbge")
-                    (println "built: libjolt_upbge.dylib"))}}}
+          :task (do (shell "jolt" "build" "--library" "-m" "upbge-jolt.library" "-o" "native/libjolt_upbge")
+                    (println "built: native/libjolt_upbge"))}}}

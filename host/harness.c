@@ -2,7 +2,7 @@
  * tick, eval, nREPL start/stop, shutdown. Exit 0 = all assertions pass.
  *
  * Build: cc -o /tmp/uj_harness host/harness.c -ldl
- * Run:   /tmp/uj_harness ./libjolt_upbge.dylib
+ * Run:   /tmp/uj_harness native/libjolt_upbge.dylib
  */
 
 #include <dlfcn.h>

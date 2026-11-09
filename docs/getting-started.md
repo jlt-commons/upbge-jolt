@@ -9,7 +9,7 @@ PATH), a C/C++ toolchain, CMake, and the UPBGE build dependencies.
 jolt upbge-deps      # clone UPBGE into native/upbge and build its dependencies
 host/integrate.sh    # add the shim and host integration, apply fixes, build
                      # Blender and the standalone player
-jolt lib             # build libjolt_upbge.dylib (the jolt runtime)
+jolt lib             # build native/libjolt_upbge.dylib (the jolt runtime)
 jolt test            # headless tests against a mock host
 ```
 

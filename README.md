@@ -102,7 +102,7 @@ Two directions of calling:
 ```
 jolt native   # build the mock shim dylib
 jolt test     # unit tests (headless, mock shim)
-jolt lib      # build libjolt_upbge.dylib (--library)
+jolt lib      # build native/libjolt_upbge.dylib (--library)
 jolt metrics  # code-metrics report (jolt-metrics) over src
 jolt docs     # regenerate docs/api.md from the source docstrings
 jolt upbge-deps  # clone UPBGE into native/upbge + build its dependencies
@@ -113,7 +113,7 @@ Harness (embedding contract check):
 
 ```
 cc -o /tmp/uj_harness host/harness.c -ldl
-/tmp/uj_harness ./libjolt_upbge.dylib
+/tmp/uj_harness native/libjolt_upbge.dylib
 ```
 
 Build + run against the real engine (after `jolt upbge-deps` clones UPBGE):
