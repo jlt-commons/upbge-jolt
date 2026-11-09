@@ -707,7 +707,7 @@
   (when (bge/key-pressed? "HKEY") (swap! S update :ui not))
   (when (bge/key-pressed? "F1KEY") (swap! S update :help not))
   (when (bge/key-pressed? "PKEY")
-    (try (bge/screenshot! "/Users/yogthos/src/jlt-commons/upbge-jolt/example/yacht/shot-user.png")
+    (try (bge/screenshot! (str (System/getenv "HOME") "/yacht-" (System/currentTimeMillis) ".png"))
          (msg! "Screenshot saved") (catch Exception _ nil)))
   (when (bge/key-pressed? "LEFTMOUSE")
     (swap! S assoc :look true))          ; mouse-look re-locks the pointer

@@ -319,7 +319,7 @@
         obj (b/object-new "HeroCam" cd)]
     (b/set! cd "lens" 35.0)
     (b/set! cd "clip_start" 0.1)
-    (b/set! cd "clip_end" 40000.0)
+    (b/set! cd "clip_end" 4000.0)
     (bpy/link! obj)
     (b/set! obj "location" [0.0 -30.0 2.2])
     ;; look toward the sun (azimuth +60 from +Y), tilted 1.5 deg down
@@ -378,8 +378,11 @@
         cam (build-camera! sc)
         mat (build-ocean-material "Ocean")
         ocean (build-ocean "Ocean"
-                           {:rings 480 :segments 288 :rmax 8000.0 :s0 0.22})]
+                           {:rings 60 :segments 96 :rmax 1200.0 :s0 0.3})]
     (nodes/assign! ocean mat)
+    ;; the sun's shadow map would have to cover the whole ocean out to the
+    ;; camera's clip_end: a shadow-casting ocean costs seconds per frame
+    (b/set! ocean "visible_shadow" false)
     ;; keep the exact same wave model in the .blend for main.clj / buoyancy
     (let [t (or (b/lookup (bpy/data) "texts" wave-text-name)
                 (b/call (b/get (bpy/data) "texts") "new" {:name wave-text-name}))]
@@ -579,8 +582,10 @@
            "taa" (b/get (b/get (bpy/scene) "eevee") "taa_samples")
            "fastgi" (b/get (b/get (bpy/scene) "eevee") "use_fast_gi")))
 
-(defn save! []
-  (bpy/save! "/Users/yogthos/src/jlt-commons/upbge-jolt/example/yacht/yacht.blend"))
+(defn save!
+  "Save the scene to `path`, by default the file it was opened from."
+  ([] (save! (b/get (b/data) "filepath")))
+  ([path] (bpy/save! path)))
 
 (comment
   (build!)

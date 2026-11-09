@@ -11,16 +11,18 @@ Task: `example/PROMPT.md`. Work is done live over nREPL (see
   Wave set is the Text `ocean-waves.edn`. `(yacht-build/build!)` rebuilds the
   sea scene; `(yacht-build/tune!)` re-applies the play settings and the ocean
   tuning to an existing scene without a rebuild.
-- `yacht.clj` (ns `yacht`, `(y/build!)`, `(y/materials!)`): the yacht. `build!`
+- `yacht.clj` (ns `yacht`, `(yacht/build!)`, `(yacht/materials!)`): the yacht. `build!`
   deletes all `Y-*` objects and rebuilds; it also (re)creates the
   `Y-WaveParams` empty and the ocean hull mask.
 - `main.clj` (ns `yacht-main`): the game logic. Keys: E (helm on/off), W/S
   throttle, A/D steer, WASD + Shift walk, mouse look, C helm/chase camera,
   O orbit/photo, T time of day, H hide UI, P screenshot, F1 help, 1/2/3, Esc.
-- `screenshots/`: showcase stills `01-hero-exterior`, `02-side-profile`,
-  `03-saloon-interior`, `04-helm`, `05-cockpit-lounge`, and time of day
-  `06-golden-hour`, `07-midday`, `08-sunset`, `09-night`. (Root `*.png` is
-  git-ignored; the `screenshots/` folder is not.)
+- `shots/`: showcase stills (JPEG, committed): `01-hero-exterior`,
+  `02-side-profile`, `03-saloon-interior`, `04-helm`, `05-cockpit-lounge`, and
+  time of day `06-golden-hour`, `07-midday`, `08-sunset`, `09-night`. The
+  full-size PNGs in `screenshots/` and scratch `*.png` are git-ignored.
+- Rebuilding from an empty scene: see README.md. The session-5 ocean tuning
+  (ocean size, `clip_end` 4000, no ocean shadow casting) is in the sources.
 
 ## Resume
 
@@ -35,12 +37,10 @@ Task: `example/PROMPT.md`. Work is done live over nREPL (see
 ## Next
 
 1. Play through in a fresh game: intro skip, walk every room, stairs, doors,
-   the helm and driving, the cameras, time of day. Mouse warp still needs a
-   person to confirm it (see Known problems).
+   the helm and driving, the cameras, time of day.
 2. Remaining PROMPT.md items: the guest cabin, wake and spray, audio polish
    (engine/water/wind already exist via `upbge-jolt.audio`), dedicated night
    lighting, a quality setting, and finalising the 10 screenshots.
-3. Write the README for the demo (PROMPT.md section 9).
 
 ## Session 5 summary
 
@@ -78,9 +78,8 @@ Task: `example/PROMPT.md`. Work is done live over nREPL (see
   gains will need fewer noise octaves, simpler bump, or a smaller world-space
   LOD, not fewer vertices. Measure over at least 25 s after any change:
   shader recompiles skew the average and the intro camera changes the cost.
-- Mouse look now uses `bge/mouse-look` (pointer lock), which replaced the warp-based code that spun.
-  cursor, which made mouse look spin. main.clj guards against it; a person
-  needs to confirm in an interactive play session.
+- Mouse look uses `bge/mouse-look` (pointer lock). The earlier warp-to-centre
+  code spun; pointer lock fixed it, confirmed in a play session.
 - Setting materials one polygon at a time is very slow; use bulk
   `foreach-set!` on `material_index`.
 - Long builds can exceed the agent's nREPL request timeout. Split them.

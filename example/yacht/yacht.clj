@@ -105,9 +105,9 @@
         e1 (b/lookup el "elements" 1)]
     (b/set! el "interpolation" "EASE")
     (b/set! e0 "position" 0.012)
-    (b/set! (b/get e0 "color") "default_value" [0.045 0.030 0.016 1.0])
+    (b/set! e0 "color" [0.045 0.030 0.016 1.0])
     (b/set! e1 "position" 0.10)
-    (b/set! (b/get e1 "color") "default_value" [0.56 0.36 0.17 1.0])
+    (b/set! e1 "color" [0.56 0.36 0.17 1.0])
     ;; grain
     (let [noise (nodes/node! nt "ShaderNodeTexNoise")
           _ (set-in nt (nodes/socket tc :out "Object") noise "Vector")
@@ -115,7 +115,7 @@
           _ (set-in nt 3.0 noise "Detail")
           _ (set-in nt 0.6 noise "Roughness")
           mix (nodes/node! nt "ShaderNodeMixRGB")
-          _ (set-in nt (b/get noise "Fac") mix "Fac")
+          _ (set-in nt (nodes/socket noise :out "Fac") mix "Fac")
           _ (set-in nt (nodes/socket ramp :out "Color") mix "Color1")
           _ (set-in nt [0.72 0.50 0.26 1.0] mix "Color2")
           _ (set-in nt (nodes/socket mix :out "Color") bsdf "Base Color")]
@@ -889,7 +889,7 @@
         o (b/object-new name cd)]
     (b/set! cd "lens" lens)
     (b/set! cd "clip_start" 0.05)
-    (b/set! cd "clip_end" 40000.0)
+    (b/set! cd "clip_end" 4000.0)
     (bpy/link! o)
     (b/set! o "location" loc)
     o))
