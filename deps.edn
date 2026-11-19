@@ -30,7 +30,8 @@
            ;; code metrics (jlt-commons/jolt-metrics): jolt -M:metrics src
            :metrics {:extra-deps {jlt-commons/jolt-metrics
                                   {:git/url "https://github.com/jlt-commons/jolt-metrics"
-                                   :git/sha "c23aec7f5071c60b6ba9be61dd93afa3583a375f"}}
+                                   :git/tag "v0.7.1"
+                                   :git/sha "d134ab131364170c1b3171443e848f13e6db7638"}}
                      :main-opts ["-m" "metrics.cli"]}}
 
  :tasks {:requires ([babashka.fs :as fs])
